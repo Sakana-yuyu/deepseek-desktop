@@ -1,0 +1,92 @@
+# DeepSeek Harness Desktop (Tauri)
+
+[English](README.md) | 中文
+
+这是现有 `dsh web` 界面的 Rust/WebView2 外壳。安装包携带 **Harness 源码**，不包含 `node_modules`；首次运行只从镜像拉取构建工具，再对安装包内的源码树执行 `pnpm install --prod`。
+
+当前桌面预发布版本：**0.1.0-rc.5**。
+
+## 架构
+
+| 层 | 安装包内容 | 首次运行 |
+|---|---|---|
+| **安装包** | Tauri 二进制、启动页、裁剪后的 monorepo 子集（`bundled/harness/`） | — |
+| **构建环境** | — | Node（npmmirror）、pnpm（通过 npm 与 npmmirror registry 安装） |
+| **依赖** | — | 在平台应用数据目录执行 `pnpm install --prod --no-frozen-lockfile`（裁剪包与 lockfile 不完全相同；移除 `CI`，避免 pnpm 强制冻结安装） |
+| **Host** | — | `node apps/cli/lib/bin.js web --host 127.0.0.1` |
+| **UI** | — | WebView2 → `http://127.0.0.1:17890`（现有 React Web 客户端） |
+
+安装包内的源码树包括：带已构建 `lib/` 的 `apps/cli`、带 `dist/` 的 `apps/web`、除 examples 与 test-support 外的 `packages/*/*`、`native/landlock-run`、`vendor/*`、`patches/` 和 lockfile。构建安装包时会移除 workspace 的 `devDependencies`，使 `--prod` 安装无需解析演示包。
+
+### 镜像（可通过环境变量覆盖）
+
+| 变量 | 默认值 |
+|---|---|
+| `DSH_NODE_MIRROR` | `https://npmmirror.com/mirrors/node` |
+| `DSH_NPM_REGISTRY` | `https://registry.npmmirror.com` |
+
+### 开发与生产模式
+
+| 模式 | 环境变量 | 行为 |
+|---|---|---|
+| **本地开发** | `DSH_DESKTOP_LAUNCH=local` | 使用 monorepo checkout 和 `PATH` 中的 `node`/`pnpm`，跳过镜像下载 |
+| **生产** | （默认） | 从安装包复制 `harness-source` 到应用数据目录，通过镜像安装，再启动应用 |
+
+可写目录位于平台应用数据目录下：Windows 使用 `%APPDATA%\DeepSeek Harness`，macOS 使用 `~/Library/Application Support/ai.deepseek.dsh-desktop`，Linux 使用 Tauri 返回的平台数据目录。
+
+- `harness/` — 初始源码，以及首次 `pnpm install` 后的 `node_modules`
+- `runtime/` — Node、pnpm-global 和 manifest
+- `dsh-home/` — session 数据（`DSH_HOME`）
+- `cache/` — 下载的 Node zip 或 tarball
+
+预配器会为 Windows x64/x86、macOS x64/arm64 和 Linux x64/arm64 选择 Node。zip 与 tar.gz 解压会拒绝预期 Node 根目录以外的条目。Unix 压缩包保留可执行权限，pnpm 由下载的 Node 二进制执行，因此首次启动不依赖系统 Node。
+
+## 构建
+
+在仓库根目录执行（需要已构建的 CLI 与 Web dist）：
+
+```powershell
+pnpm run build
+cd apps/desktop-tauri
+pnpm install
+pnpm run build:win
+```
+
+安装包输出：`src-tauri/target/release/bundle/nsis/DeepSeek Harness_0.1.0-rc.5_x64-setup.exe`
+
+NSIS 安装包包含**英语**、**简体中文**和**繁体中文**。安装语言自动跟随操作系统 locale，不显示语言选择器；不支持的 locale 使用英语。
+
+## 发布
+
+推送 `desktop-v*` tag 会运行[桌面发布工作流](../../.github/workflows/desktop-release.yml)。该工作流构建 Windows x64/x86 NSIS 安装包、macOS Intel/Apple Silicon DMG 和 Linux x64 AppImage/deb，并在所有矩阵任务成功后发布一个预发布版本。手动触发可重新构建现有 tag。
+
+Release 资产名称包含操作系统和架构。云端产物目前未签名，也未经过 notarization，因此 Windows SmartScreen、macOS Gatekeeper 或 Linux 桌面安全提示可能要求用户明确批准。
+
+Windows、macOS 和 Linux 图标均从 `app-icon.svg` 生成；其中使用与 `packages/client/ui-primitives/src/FishLogo.tsx` 相同的透明背景黑色鱼形路径。Tauri bundle、NSIS 安装器与卸载器、启动窗口、主窗口标题栏、任务栏、Dock 和 Linux desktop entry 均使用这套图标。
+
+只生成源码包（不运行 Tauri）：
+
+```powershell
+node scripts/bundle-harness-source.mjs
+```
+
+## 运行
+
+**开发模式（monorepo checkout）：**
+
+```powershell
+# repo root: pnpm run build  (once)
+cd apps/desktop-tauri
+$env:DSH_DESKTOP_LAUNCH='local'
+pnpm run dev
+```
+
+**已安装应用：**运行 NSIS 安装包；首次启动会在启动页显示 Node、pnpm 和依赖的安装进度，完成后打开 Web UI。
+
+## 脚本
+
+| 脚本 | 用途 |
+|---|---|
+| `scripts/bundle-harness-source.mjs` | 裁剪并复制 monorepo 子集到 `bundled/harness/` |
+| `scripts/prepare-dist.mjs` | 生成启动页 dist 与源码包（Tauri `beforeBuildCommand`） |
+| `scripts/serve-dist.mjs` | 为 `tauri dev` 启动静态启动页服务器 |

@@ -1,0 +1,20 @@
+{
+  "name": "@deepseek-ai/dsh-desktop",
+  "productName": "DeepSeek Harness",
+  "description": "Tauri desktop shell: bundled harness source + mirror-fetched Node/pnpm deps",
+  "version": "0.1.0-rc.5",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bundle:source": "node scripts/bundle-harness-source.mjs",
+    "prepare:dist": "node scripts/prepare-dist.mjs",
+    "dev": "tauri dev",
+    "dev:local": "cross-env DSH_DESKTOP_LAUNCH=local tauri dev",
+    "build": "tauri build",
+    "build:win": "tauri build --bundles nsis"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.9.6",
+    "cross-env": "^7.0.3"
+  }
+}

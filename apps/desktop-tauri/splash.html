@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DeepSeek Harness</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: #0f1117;
+      color: #e6e8ef;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    h1 { font-size: 1.25rem; font-weight: 600; margin-bottom: 0.5rem; }
+    #status { font-size: 0.875rem; color: #9aa3b5; text-align: center; max-width: 28rem; line-height: 1.5; }
+    progress {
+      width: 100%;
+      max-width: 20rem;
+      height: 4px;
+      margin-top: 1.25rem;
+      appearance: none;
+      border: none;
+      background: #252a36;
+      border-radius: 2px;
+    }
+    progress::-webkit-progress-bar { background: #252a36; border-radius: 2px; }
+    progress::-webkit-progress-value { background: #4d7cff; border-radius: 2px; }
+    #error { color: #f87171; margin-top: 1rem; font-size: 0.8125rem; display: none; white-space: pre-wrap; text-align: center; max-width: 28rem; }
+  </style>
+</head>
+<body>
+  <h1>DeepSeek Harness</h1>
+  <p id="status">正在准备运行环境…</p>
+  <progress id="bar" value="0" max="100"></progress>
+  <p id="error"></p>
+  <script>
+    const statusEl = document.getElementById('status')
+    const barEl = document.getElementById('bar')
+    const errorEl = document.getElementById('error')
+    window.__DSH_SPLASH__ = {
+      setStatus(text) { statusEl.textContent = text },
+      setProgress(pct) { barEl.value = Math.min(100, Math.max(0, pct)) },
+      setError(text) {
+        errorEl.style.display = 'block'
+        errorEl.textContent = text
+        statusEl.textContent = '启动失败'
+      },
+    }
+  </script>
+</body>
+</html>
