@@ -12,8 +12,8 @@ pub const DEFAULT_WEB_PORT: u16 = 17_890;
 /// Bundled harness resource directory name inside Tauri resources.
 pub const BUNDLED_HARNESS_DIR: &str = "harness-source";
 
-/// Writable harness tree under app data.
-pub const HARNESS_WORK_DIR: &str = "harness";
+/// Parent for bundle-specific writable harness trees under app data.
+pub const HARNESS_VERSIONS_DIR: &str = "harness-versions";
 
 /// China-friendly Node mirror (override with `DSH_NODE_MIRROR`).
 pub fn node_mirror_base() -> String {

@@ -12,7 +12,7 @@ use zip::ZipArchive;
 use super::boot_log;
 use super::config::{
     dev_launch_mode, node_mirror_base, npm_registry, DEFAULT_NODE_VERSION, DEFAULT_PNPM_VERSION,
-    HARNESS_WORK_DIR,
+    HARNESS_VERSIONS_DIR,
 };
 use super::process::hide_console;
 use super::{app_data_root, ProvisionEvent};
@@ -61,7 +61,9 @@ pub async fn ensure_runtime(
     let runtime_root = app_data_root()?.join("runtime");
     let node_dir = runtime_root.join("node");
     let pnpm_home = runtime_root.join("pnpm-global");
-    let harness_root = app_data_root()?.join(HARNESS_WORK_DIR);
+    let app_root = app_data_root()?;
+    let bundle_hash = read_bundle_hash(&bundled)?;
+    let harness_root = harness_root_for_bundle(&app_root, &bundle_hash);
     let manifest_path = runtime_root.join("manifest.json");
 
     let node_binary = node_binary_path(&node_dir);
@@ -107,14 +109,22 @@ pub async fn ensure_runtime(
         DEFAULT_NODE_VERSION
     )));
     progress(ProvisionEvent::Progress(15));
-    fetch_node(&node_dir, DEFAULT_NODE_VERSION, &progress).await?;
+    if node_runtime_ready(&node_binary) {
+        boot_log::info("reusing installed Node runtime");
+    } else {
+        fetch_node(&node_dir, DEFAULT_NODE_VERSION, &progress).await?;
+    }
 
     progress(ProvisionEvent::Status(format!(
         "正在从镜像安装 pnpm {}…",
         DEFAULT_PNPM_VERSION
     )));
     progress(ProvisionEvent::Progress(35));
-    install_pnpm(&node_binary, &node_dir, &pnpm_home, DEFAULT_PNPM_VERSION)?;
+    if pnpm_binary.is_file() {
+        boot_log::info("reusing installed pnpm runtime");
+    } else {
+        install_pnpm(&node_binary, &node_dir, &pnpm_home, DEFAULT_PNPM_VERSION)?;
+    }
 
     progress(ProvisionEvent::Status(
         "正在从镜像安装依赖 (pnpm install --prod --no-frozen-lockfile)…".into(),
@@ -255,6 +265,31 @@ fn read_bundle_hash(bundled: &Path) -> Result<String, String> {
         .as_str()
         .map(str::to_string)
         .ok_or_else(|| format!("invalid bundle manifest: {}", manifest.display()))
+}
+
+fn harness_root_for_bundle(app_root: &Path, bundle_hash: &str) -> PathBuf {
+    let directory = bundle_hash.get(..16).unwrap_or(bundle_hash);
+    app_root.join(HARNESS_VERSIONS_DIR).join(directory)
+}
+
+fn node_runtime_ready(node_binary: &Path) -> bool {
+    if !node_binary.is_file() {
+        return false;
+    }
+    let mut command = Command::new(node_binary);
+    command
+        .arg("--version")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    hide_console(&mut command);
+    command
+        .output()
+        .map(|output| {
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout).trim()
+                    == format!("v{DEFAULT_NODE_VERSION}")
+        })
+        .unwrap_or(false)
 }
 
 fn write_manifest(
@@ -677,8 +712,23 @@ fn pnpm_install_harness(
 
 #[cfg(test)]
 mod tests {
-    use super::{node_archive_spec_for, safe_archive_relative_path};
-    use std::path::Path;
+    use super::{harness_root_for_bundle, node_archive_spec_for, safe_archive_relative_path};
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn isolates_harness_trees_by_bundle_hash() {
+        let app_root = Path::new("app-data");
+        assert_eq!(
+            harness_root_for_bundle(app_root, "0123456789abcdefaaaaaaaaaaaaaaaa"),
+            PathBuf::from("app-data")
+                .join("harness-versions")
+                .join("0123456789abcdef")
+        );
+        assert_ne!(
+            harness_root_for_bundle(app_root, "0123456789abcdefaaaaaaaaaaaaaaaa"),
+            harness_root_for_bundle(app_root, "fedcba9876543210bbbbbbbbbbbbbbbb")
+        );
+    }
 
     #[test]
     fn selects_node_archive_for_every_release_target() {

@@ -12,6 +12,8 @@ Status: implemented
 
 **桌面安装包携带裁剪后的源码树和已构建应用产物，但不携带 `node_modules`。** 首次启动把该只读资源复制到应用数据目录，下载与编译目标操作系统和架构匹配的 Node 压缩包，通过该 Node 运行时安装 pnpm，再在移除 `CI` 的环境中执行 `pnpm install --prod --no-frozen-lockfile`。镜像端点仍可通过 `DSH_NODE_MIRROR` 和 `DSH_NPM_REGISTRY` 配置。
 
+**每个源码包使用隔离的可写目录。** 内容哈希选择 `harness-versions/<bundle-hash>`，因此更新不会删除旧 Host 正在占用的文件。兼容的 Node 和 pnpm 运行时保持共享，并在源码更新之间复用。原生外壳只允许一个应用实例，再次启动时会聚焦已有窗口。
+
 **下载的运行时负责执行所有预配命令。** Windows x64 和 x86 使用官方 zip 布局；macOS x64/arm64 与 Linux x64/arm64 使用 tar.gz 布局。压缩包条目必须位于预期的带版本 Node 目录之下。tar 解压保留 Unix 权限位，npm 按平台对应的 Node 分发布局解析，pnpm 则由下载的 Node 二进制直接执行其 JavaScript 入口，不依赖 shebang 或主机 `PATH`。
 
 **一个 tag 发布一套完整桌面矩阵。** `desktop-v*` tag 构建 Windows x64/x86 NSIS 安装包、macOS Intel/Apple Silicon DMG，以及 Linux x64 AppImage/deb。每个矩阵任务上传带操作系统和架构标识的产物；下游 release 任务先验证集合完整，再创建或更新一个 GitHub 预发布版本。这些预发布产物未签名，也未经过 notarization。
@@ -30,4 +32,4 @@ Status: implemented
 
 ## 后果
 
-安装包保持紧凑，但首次启动需要网络连接，并可能在安装依赖时持续数分钟。运行时文件和依赖占用应用数据目录，而不是安装目录。发布工作流需要为完整平台矩阵投入构建时间，并在缺少任一必需包时阻止发布。操作系统安全策略要求时，用户必须明确批准这些未签名的预发布二进制。
+安装包保持紧凑，但首次启动需要网络连接，并可能在安装依赖时持续数分钟。运行时文件和依赖占用应用数据目录，而不是安装目录。源码更新期间，旧 Host 仍占用文件时可能暂时保留旧的 bundle 专属目录；后续清理可以移除不活动目录，而不阻塞启动。发布工作流需要为完整平台矩阵投入构建时间，并在缺少任一必需包时阻止发布。操作系统安全策略要求时，用户必须明确批准这些未签名的预发布二进制。

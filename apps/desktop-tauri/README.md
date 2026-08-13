@@ -34,12 +34,12 @@ Bundled tree includes: `apps/cli` (with built `lib/`), `apps/web` (with `dist/`)
 
 Writable paths live under the platform application-data directory (`%APPDATA%\DeepSeek Harness` on Windows, `~/Library/Application Support/ai.deepseek.dsh-desktop` on macOS, and the platform data directory returned by Tauri on Linux):
 
-- `harness/` — seeded source + `node_modules` after first `pnpm install`
+- `harness-versions/<bundle-hash>/` — bundle-specific source + `node_modules` after first `pnpm install`
 - `runtime/` — Node, pnpm-global, manifest
 - `dsh-home/` — session data (`DSH_HOME`)
 - `cache/` — downloaded Node zip or tarball
 
-The provisioner selects Node for Windows x64/x86, macOS x64/arm64, and Linux x64/arm64. Zip and tar.gz extraction reject entries outside the expected Node archive root. Unix archives retain executable permissions, and pnpm runs through the downloaded Node binary so first launch does not depend on a system Node installation.
+The provisioner selects Node for Windows x64/x86, macOS x64/arm64, and Linux x64/arm64. Zip and tar.gz extraction reject entries outside the expected Node archive root. Unix archives retain executable permissions, and pnpm runs through the downloaded Node binary so first launch does not depend on a system Node installation. Bundle-specific harness directories let an update provision new source without deleting files used by an older running Host; the downloaded Node and pnpm runtimes are reused when their versions remain current. The native shell permits one application instance and focuses the existing window on repeated launches.
 
 ## Build
 

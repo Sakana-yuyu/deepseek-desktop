@@ -34,12 +34,12 @@
 
 可写目录位于平台应用数据目录下：Windows 使用 `%APPDATA%\DeepSeek Harness`，macOS 使用 `~/Library/Application Support/ai.deepseek.dsh-desktop`，Linux 使用 Tauri 返回的平台数据目录。
 
-- `harness/` — 初始源码，以及首次 `pnpm install` 后的 `node_modules`
+- `harness-versions/<bundle-hash>/` — 按源码包隔离的源码，以及首次 `pnpm install` 后的 `node_modules`
 - `runtime/` — Node、pnpm-global 和 manifest
 - `dsh-home/` — session 数据（`DSH_HOME`）
 - `cache/` — 下载的 Node zip 或 tarball
 
-预配器会为 Windows x64/x86、macOS x64/arm64 和 Linux x64/arm64 选择 Node。zip 与 tar.gz 解压会拒绝预期 Node 根目录以外的条目。Unix 压缩包保留可执行权限，pnpm 由下载的 Node 二进制执行，因此首次启动不依赖系统 Node。
+预配器会为 Windows x64/x86、macOS x64/arm64 和 Linux x64/arm64 选择 Node。zip 与 tar.gz 解压会拒绝预期 Node 根目录以外的条目。Unix 压缩包保留可执行权限，pnpm 由下载的 Node 二进制执行，因此首次启动不依赖系统 Node。按源码包隔离的 Harness 目录允许更新版本预配新源码，而不删除旧 Host 正在使用的文件；Node 和 pnpm 版本未变时会复用已有运行时。原生外壳只允许一个应用实例，重复启动时聚焦已有窗口。
 
 ## 构建
 
