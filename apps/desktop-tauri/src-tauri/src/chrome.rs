@@ -10,6 +10,7 @@ const DSH_BG: Color = Color(21, 21, 23, 255);
 use crate::desktop_settings::{self, CloseAction};
 use crate::notify;
 use crate::runtime::boot_log;
+use crate::runtime::DesktopRuntime;
 use crate::window_layout::resolve_controls_layout;
 
 static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -22,10 +23,18 @@ pub fn quit_requested() -> bool {
 /// Exit the process after marking quit so `ExitRequested` is not cancelled.
 pub fn request_quit(app: &AppHandle) {
     QUIT_REQUESTED.store(true, Ordering::SeqCst);
+    stop_host(app);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.destroy();
     }
     app.exit(0);
+}
+
+/// Reap the Host Node tree. `app.exit` / `app.restart` skip `Drop`.
+pub fn stop_host(app: &AppHandle) {
+    if let Some(runtime) = app.try_state::<DesktopRuntime>() {
+        runtime.host.stop();
+    }
 }
 
 /// Create the frameless shell window that embeds `dsh web`.

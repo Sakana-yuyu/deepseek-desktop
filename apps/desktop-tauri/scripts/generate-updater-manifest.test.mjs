@@ -13,7 +13,7 @@ import {
   writeUpdaterManifest,
 } from './generate-updater-manifest.mjs'
 
-const version = '0.1.0-rc.5-0.4'
+const version = '0.1.0-rc.5-0.5'
 const repository = 'deepseek-ai/deepseek-harness'
 const releaseTag = `desktop-v${version}`
 const pubDate = '2026-08-14T00:00:00.000Z'

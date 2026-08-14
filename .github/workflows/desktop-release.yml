@@ -9,7 +9,7 @@ on:
       tag:
         description: Existing desktop-v* tag to rebuild and publish
         required: true
-        default: desktop-v0.1.0-rc.5-0.4
+        default: desktop-v0.1.0-rc.5-0.5
 
 permissions:
   contents: write

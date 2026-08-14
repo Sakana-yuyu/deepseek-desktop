@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use super::boot_log;
 use super::process::hide_console;
-use super::provision::RuntimePaths;
+use super::provision::{pnpm_js_entry, RuntimePaths};
 use super::user_home::{profile_dependencies_unresolved, profiles_needing_install};
 use super::ProvisionEvent;
 
@@ -20,11 +20,12 @@ const INSTALL_TIMEOUT: Duration = Duration::from_secs(600);
 pub const HOST_PROFILE: &str = "web";
 
 /// Ensure every profile under `DSH_HOME` can resolve its declared dependencies
-/// before the Host starts: profiles needing install run
-/// `dsh plugin --profile <name> install` (which forwards to pnpm on the bridged
-/// PATH) and are re-verified afterwards. A failed repair of a non-Host profile
-/// is logged and deferred; a failed repair of {@link HOST_PROFILE} fails boot
-/// with the manual command to run.
+/// before the Host starts: profiles needing install run `node …/pnpm.cjs
+/// install` in the profile directory when that entry exists, otherwise
+/// `dsh plugin --profile <name> install` on the bridged PATH, and are
+/// re-verified afterwards. A failed repair of a non-Host profile is logged
+/// and deferred; a failed repair of {@link HOST_PROFILE} fails boot with the
+/// manual command to run.
 pub async fn ensure_profile_installs(
     paths: &RuntimePaths,
     host_path: &str,
@@ -65,16 +66,21 @@ pub async fn ensure_profile_installs(
 
 /// Run one install and re-verify the profile can resolve its dependencies.
 fn run_profile_install(paths: &RuntimePaths, host_path: &str, name: &str) -> Result<(), String> {
+    let profile_dir = profile_dir(&paths.dsh_home, name);
     let mut cmd = Command::new(&paths.node_binary);
-    cmd.arg(&paths.cli_entry)
-        .arg("plugin")
-        .arg("--profile")
-        .arg(name)
-        .arg("install")
-        .env("DSH_HOME", &paths.dsh_home)
+    if let Some(entry) = pnpm_js_entry(&paths.pnpm_binary) {
+        cmd.arg(entry).arg("install").current_dir(&profile_dir);
+    } else {
+        cmd.arg(&paths.cli_entry)
+            .arg("plugin")
+            .arg("--profile")
+            .arg(name)
+            .arg("install")
+            .current_dir(&paths.harness_root);
+    }
+    cmd.env("DSH_HOME", &paths.dsh_home)
         .env("PATH", host_path)
         .env("NODE_ENV", "production")
-        .current_dir(&paths.harness_root)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     hide_console(&mut cmd);
@@ -119,7 +125,6 @@ fn run_profile_install(paths: &RuntimePaths, host_path: &str, name: &str) -> Res
             format_output_tail(&output_tail)
         ));
     }
-    let profile_dir = profile_dir(&paths.dsh_home, name);
     if profile_dependencies_unresolved(&profile_dir) {
         return Err(format!(
             "安装完成但依赖仍无法解析{}",

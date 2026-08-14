@@ -10,9 +10,9 @@
  * @module @deepseek-ai/dsh/plugin
  */
 
-import { spawnSync } from 'node:child_process'
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { delimiter, join, resolve } from 'node:path'
 import {
   DEFAULT_PROFILE_BUNDLES,
   initProfile,
@@ -112,6 +112,55 @@ function anchorPathSpec(argument: string, cwd: string): string {
 }
 
 /**
+ * Run pnpm in `cwd`. Prefer `node pnpm.cjs` so Windows never opens a `cmd.exe`
+ * console for the `.cmd` shim; fall back to `pnpm` with a hidden shell.
+ * @param args - pnpm arguments, already path-anchored.
+ * @param cwd - the profile directory.
+ * @returns the spawn result.
+ */
+function runPnpm(args: readonly string[], cwd: string): SpawnSyncReturns<Buffer> {
+  const forwarded = [...args]
+  const cjs = findPnpmCjs()
+  if (cjs !== undefined) {
+    return spawnSync(process.execPath, [cjs, ...forwarded], {
+      cwd,
+      stdio: 'inherit',
+      windowsHide: true,
+    })
+  }
+  // Windows resolves pnpm through its .cmd shim, which spawn() refuses
+  // without a shell since the CVE-2024-27980 hardening. windowsHide keeps
+  // that shell from opening a console window when the parent has none.
+  return spawnSync('pnpm', forwarded, {
+    cwd,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+    windowsHide: true,
+  })
+}
+
+/**
+ * Locate `pnpm.cjs` next to a `pnpm` / `pnpm.cmd` on `PATH`.
+ * @returns the script path, or `undefined` when only a bare `pnpm` name remains.
+ */
+function findPnpmCjs(): string | undefined {
+  const names = process.platform === 'win32' ? ['pnpm.cmd', 'pnpm.exe', 'pnpm'] : ['pnpm']
+  for (const dir of (process.env.PATH ?? '').split(delimiter)) {
+    if (dir.length === 0) continue
+    const hasBin = names.some(name => existsSync(join(dir, name)))
+    if (!hasBin) continue
+    const candidates = [
+      join(dir, 'node_modules', 'pnpm', 'bin', 'pnpm.cjs'),
+      join(dir, 'lib', 'node_modules', 'pnpm', 'bin', 'pnpm.cjs'),
+      join(dir, 'pnpm', 'bin', 'pnpm.cjs'),
+    ]
+    const hit = candidates.find(path => existsSync(path))
+    if (hit !== undefined) return hit
+  }
+  return undefined
+}
+
+/**
  * Run one `dsh plugin` invocation: init if needed, forward to pnpm, reconcile.
  * @param profile - the profile name.
  * @param args - pnpm arguments with relative path specs anchored to the invoking directory.
@@ -124,13 +173,7 @@ export function runPlugin(profile: string, args: readonly string[]): number {
     process.stderr.write(`${NAME}: initialized profile ${profile} at ${dir}\n`)
   }
   const before = readProfileManifest(NAME, dir)
-  // Windows resolves pnpm through its .cmd shim, which spawn() refuses
-  // without a shell since the CVE-2024-27980 hardening.
-  const result = spawnSync('pnpm', args.map(argument => anchorPathSpec(argument, process.cwd())), {
-    cwd: dir,
-    stdio: 'inherit',
-    shell: process.platform === 'win32',
-  })
+  const result = runPnpm(args.map(argument => anchorPathSpec(argument, process.cwd())), dir)
   if (result.error !== undefined) {
     const code = (result.error as NodeJS.ErrnoException).code
     if (code === 'ENOENT') {

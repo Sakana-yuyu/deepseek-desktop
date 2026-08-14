@@ -871,7 +871,7 @@ fn configure_pnpm_install(
     Ok(())
 }
 
-fn pnpm_js_entry(pnpm_binary: &Path) -> Option<PathBuf> {
+pub(crate) fn pnpm_js_entry(pnpm_binary: &Path) -> Option<PathBuf> {
     let parent = pnpm_binary.parent()?;
     let homes = [Some(parent), parent.parent()];
     for home in homes.into_iter().flatten() {

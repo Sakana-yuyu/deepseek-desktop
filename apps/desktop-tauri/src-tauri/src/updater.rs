@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tauri::AppHandle;
 use tauri_plugin_updater::UpdaterExt;
 
+use crate::chrome;
 use crate::runtime::ProvisionEvent;
 
 /// Install a signed desktop update before provisioning the bundled Harness tree.
@@ -46,6 +47,7 @@ pub async fn install_available(
         .await
         .map_err(|error| error.to_string())?;
 
+    chrome::stop_host(app);
     app.restart();
 }
 
@@ -69,5 +71,6 @@ pub async fn check_now(app: &AppHandle) -> Result<String, String> {
         .download_and_install(|_, _| {}, || {})
         .await
         .map_err(|error| error.to_string())?;
+    chrome::stop_host(app);
     app.restart()
 }

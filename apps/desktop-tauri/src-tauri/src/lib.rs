@@ -16,7 +16,10 @@ use runtime::supervisor::HostOverlay;
 use runtime::{DesktopRuntime, ProvisionEvent};
 use std::path::PathBuf;
 use std::sync::Arc;
+use tauri::window::Color;
 use tauri::{AppHandle, Manager, RunEvent};
+
+const SPLASH_BG: Color = Color(0, 0, 0, 0);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -38,6 +41,8 @@ pub fn run() {
                 .ok_or("default window icon is missing")?;
             if let Some(splash) = app.get_webview_window("splash") {
                 splash.set_icon(icon)?;
+                let _ = splash.set_background_color(Some(SPLASH_BG));
+                let _ = splash.center();
             }
             tray::install(&handle)?;
             let bundled = resolve_bundled_source(&handle);
@@ -52,11 +57,17 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app, event| {
-            if let RunEvent::ExitRequested { api, .. } = event {
-                if !chrome::quit_requested() {
-                    api.prevent_exit();
+        .run(|app, event| {
+            match event {
+                RunEvent::ExitRequested { api, .. } => {
+                    if !chrome::quit_requested() {
+                        api.prevent_exit();
+                    } else {
+                        chrome::stop_host(app);
+                    }
                 }
+                RunEvent::Exit => chrome::stop_host(app),
+                _ => {}
             }
         });
 }
@@ -148,6 +159,15 @@ async fn boot_app(app: AppHandle, bundled: Option<PathBuf>) -> Result<(), String
 
     let runtime = DesktopRuntime::start(paths, host_overlay.as_ref(), progress).await?;
     let web_url = runtime.web_url.clone();
+    if !runtime.host.disabled_plugins.is_empty() {
+        let names = runtime.host.disabled_plugins.join("、");
+        boot_log::error(&format!("plugins disabled by rescue patch: {names}"));
+        notify::toast(
+            &app,
+            "DeepSeek Harness",
+            &format!("以下插件已损坏，本次启动已自动禁用：{names}。修复或更新插件后重启即可恢复。"),
+        );
+    }
     app.manage(runtime);
     if let Some(notify) = notify {
         app.manage(notify);

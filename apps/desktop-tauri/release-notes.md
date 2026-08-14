@@ -1,4 +1,4 @@
-# DeepSeek Harness Desktop 0.1.0-rc.5-0.4
+# DeepSeek Harness Desktop 0.1.0-rc.5-0.5
 
 ## English
 
@@ -8,12 +8,11 @@ The installer contains a trimmed Harness source tree without `node_modules`. On 
 
 ### What's new
 
-- First close asks whether to minimize to tray or quit, and remembers the choice. The tray can change it later.
-- The shell writes spawnable `dsh` / `pnpm` commands and puts them on PATH so in-app `dsh`, plugins, MCP `npx`, and a new terminal can find the selected toolchain.
-- On Windows, `dsh.exe` is a CLI trampoline: running it as `dsh` starts the Harness CLI instead of the GUI.
-- Broken profile installs are repaired with `dsh plugin --profile <name> install` before the Host starts.
-- File-in-use and access-denied errors during provision fall back to an existing runtime instead of aborting boot.
-- Signed update checks run after the main window opens, so a slow update network no longer holds the splash.
+- The splash is a compact transparent window: a borderless radial frost, the official fish mark, a white DeepSeek wordmark, and a progress bar, without window scrollbars.
+- On Windows, Host and CLI children stay silent when the parent has no visible console, so `dsh` / Node / pnpm no longer flash a black window during boot or plugin install.
+- Quit (tray Quit, a saved Exit close, or updater restart) stops the Host Node process tree. The next launch reaps a leftover host if the recorded image still matches.
+- If `dsh web` exits because a loader plugin fails, the shell disables that entry and retries the Host.
+- Minimize to tray still keeps the Host running.
 
 Windows installation closes a running desktop process before replacing files and refreshes an existing desktop shortcut with the versioned DeepSeek fish icon.
 
@@ -33,12 +32,11 @@ DeepSeek Harness Desktop 是现有 `dsh web` 界面的 Tauri/WebView 外壳。
 
 ### 更新内容
 
-- 第一次关闭窗口会询问最小化到托盘还是退出，并记住选择；之后可在托盘菜单更改。
-- 外壳会写入可直接 spawn 的 `dsh` / `pnpm` 命令并加入 PATH，应用内的 `dsh`、插件、MCP 的 `npx` 以及新开的终端都能找到已选定的工具链。
-- Windows 上的 `dsh.exe` 是 CLI 跳板：以 `dsh` 启动时运行 Harness CLI，而不是打开图形界面。
-- Host 启动前会检查 profile 依赖，损坏的安装会先执行 `dsh plugin --profile <name> install`。
-- 预配遇到文件占用或权限不足时，会回退到已有运行时，而不是直接启动失败。
-- 签名更新检查改到主窗口打开之后进行，更新网络慢时不再拖住启动页。
+- 启动页改为紧贴内容的透明窗口：无边框径向毛玻璃、官方鱼形标志、白色 DeepSeek 字标和进度条，出错时也不再出现窗口滚动条。
+- Windows 上，父进程没有可见控制台时，Host 与 CLI 子进程保持静默，启动或安装插件时 `dsh` / Node / pnpm 不再闪出黑框。
+- 退出（托盘退出、已保存的“退出程序”、或更新后重启）会停止 Host 的 Node 进程树；下次启动若记录的映像仍在，会回收上次残留的 Host。
+- 若 `dsh web` 因某个 loader 插件加载失败而退出，外壳会禁用该条目并重试 Host。
+- 最小化到托盘时 Host 仍保持运行。
 
 Windows 安装会先关闭正在运行的桌面进程再替换文件，并用带版本号的 DeepSeek 鱼形图标刷新已有桌面快捷方式。
 

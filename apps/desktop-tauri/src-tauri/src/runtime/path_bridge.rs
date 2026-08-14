@@ -121,8 +121,9 @@ pub fn write_cli_shims(
     dsh_home: &Path,
     install_exe: bool,
 ) -> Result<(), String> {
-    write_dsh_cmd_shim(bin_dir, node, cli_entry)?;
-    write_launch_spec(bin_dir, node, cli_entry, dsh_home)?;
+    let path_prepend = shim_path_prepend(node, pnpm);
+    write_dsh_cmd_shim(bin_dir, node, cli_entry, &path_prepend)?;
+    write_launch_spec(bin_dir, node, cli_entry, dsh_home, &path_prepend)?;
     write_pnpm_shim(bin_dir, node, pnpm)?;
     if install_exe {
         install_dsh_exe(bin_dir)?;
@@ -130,24 +131,48 @@ pub fn write_cli_shims(
     Ok(())
 }
 
-fn write_dsh_cmd_shim(bin_dir: &Path, node: &Path, cli_entry: &Path) -> Result<(), String> {
+/// Directories every `dsh` shim prepends to `PATH`: the provisioned Node and
+/// pnpm directories, so a terminal `dsh plugin` uses the same pnpm as the
+/// desktop instead of splitting one profile across two pnpm-major stores.
+fn shim_path_prepend(node: &Path, pnpm: &Path) -> Vec<PathBuf> {
+    let mut prepend = Vec::new();
+    push_unique_dir(&mut prepend, node.parent());
+    push_unique_dir(&mut prepend, pnpm.parent());
+    prepend
+}
+
+fn write_dsh_cmd_shim(
+    bin_dir: &Path,
+    node: &Path,
+    cli_entry: &Path,
+    path_prepend: &[PathBuf],
+) -> Result<(), String> {
     let node_q = quote_for_cmd(node);
     let cli_q = quote_for_cmd(cli_entry);
+    let prepend = std::env::join_paths(path_prepend)
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_default();
 
     #[cfg(windows)]
     {
         // An extensionless `dsh` on Windows shadows `dsh.cmd` for Node spawn('dsh').
         let _ = fs::remove_file(bin_dir.join("dsh"));
         let dest = bin_dir.join("dsh.cmd");
-        fs::write(&dest, format!("@echo off\r\n{node_q} {cli_q} %*\r\n"))
-            .map_err(|e| recoverable_message("write", &dest, e))?;
+        fs::write(
+            &dest,
+            format!("@echo off\r\nset \"PATH={prepend};%PATH%\"\r\n{node_q} {cli_q} %*\r\n"),
+        )
+        .map_err(|e| recoverable_message("write", &dest, e))?;
     }
 
     #[cfg(not(windows))]
     {
         let script = bin_dir.join("dsh");
-        fs::write(&script, format!("#!/bin/sh\nexec {node_q} {cli_q} \"$@\"\n"))
-            .map_err(|e| recoverable_message("write", &script, e))?;
+        fs::write(
+            &script,
+            format!("#!/bin/sh\nPATH=\"{prepend}:$PATH\"\nexec {node_q} {cli_q} \"$@\"\n"),
+        )
+        .map_err(|e| recoverable_message("write", &script, e))?;
         set_executable(&script)?;
     }
 
@@ -159,11 +184,16 @@ fn write_launch_spec(
     node: &Path,
     cli_entry: &Path,
     dsh_home: &Path,
+    path_prepend: &[PathBuf],
 ) -> Result<(), String> {
     let spec = DshLaunchSpec {
         node: node.display().to_string(),
         cli: cli_entry.display().to_string(),
         dsh_home: dsh_home.display().to_string(),
+        path_prepend: path_prepend
+            .iter()
+            .map(|dir| dir.display().to_string())
+            .collect(),
     };
     let raw = serde_json::to_string_pretty(&spec).map_err(|e| e.to_string())?;
     let dest = bin_dir.join(LAUNCH_FILE);
@@ -623,20 +653,33 @@ mod tests {
             assert!(cmd.contains("node.exe"));
             assert!(cmd.contains("bin.js"));
             assert!(cmd.contains("%*"));
+            assert!(cmd.contains("pnpm-global"));
             let pnpm_cmd = fs::read_to_string(bin.join("pnpm.cmd")).unwrap();
             assert!(pnpm_cmd.contains("node.exe"));
             assert!(pnpm_cmd.contains("pnpm.cjs"));
             let spec = read_launch_spec(&bin.join(LAUNCH_FILE)).unwrap();
             assert!(spec.cli.contains("bin.js"));
             assert!(spec.dsh_home.contains("dsh-home"));
+            let expected_prepend: Vec<String> = [node.parent().unwrap(), pnpm.parent().unwrap()]
+                .iter()
+                .map(|dir| dir.display().to_string())
+                .collect();
+            assert_eq!(spec.path_prepend, expected_prepend);
         }
         #[cfg(not(windows))]
         {
             let sh = fs::read_to_string(bin.join("dsh")).unwrap();
             assert!(sh.starts_with("#!/bin/sh"));
             assert!(sh.contains("bin.js"));
+            assert!(sh.contains("pnpm-global"));
             let pnpm_sh = fs::read_to_string(bin.join("pnpm")).unwrap();
             assert!(pnpm_sh.contains("pnpm.cjs"));
+            let spec = read_launch_spec(&bin.join(LAUNCH_FILE)).unwrap();
+            let expected_prepend: Vec<String> = [node.parent().unwrap(), pnpm.parent().unwrap()]
+                .iter()
+                .map(|dir| dir.display().to_string())
+                .collect();
+            assert_eq!(spec.path_prepend, expected_prepend);
         }
         let _ = fs::remove_dir_all(&root);
     }
