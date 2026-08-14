@@ -2,7 +2,7 @@
   "name": "@deepseek-ai/dsh-desktop",
   "productName": "DeepSeek Harness",
   "description": "Tauri desktop shell: bundled harness source + mirror-fetched Node/pnpm deps",
-  "version": "0.1.0-rc.5",
+  "version": "0.1.0-rc.5-0.1",
   "private": true,
   "type": "module",
   "scripts": {

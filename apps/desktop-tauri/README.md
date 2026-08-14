@@ -2,16 +2,16 @@
 
 English | [中文](README.zh.md)
 
-Rust/WebView2 shell over the existing `dsh web` UI. The installer ships **harness source** (no `node_modules`); first run pulls **build tools only** from mirrors, then runs `pnpm install --prod` against the bundled tree.
+Rust/WebView2 shell over the existing `dsh web` UI. The installer ships **harness source** (no `node_modules`); first run scans the host for a compatible Node / pnpm and an existing `~/.dsh` home, downloads **build tools only** when the scan finds none, then runs `pnpm install --prod` against the bundled tree.
 
-Current desktop prerelease: **0.1.0-rc.5**.
+Current desktop prerelease: **0.1.0-rc.5-0.1**.
 
 ## Architecture
 
 | Layer | What ships | First run |
 |---|---|---|
 | **Installer** | Tauri binary + splash + trimmed monorepo slice (`bundled/harness/`) | — |
-| **Build env** | — | Node (npmmirror), pnpm (via npm + npmmirror registry) |
+| **Build env** | — | Reuse host Node 22.19+ or 24+ and pnpm when present; otherwise Node (npmmirror) and pnpm (via npm + npmmirror registry) |
 | **Dependencies** | — | `pnpm install --prod --no-frozen-lockfile` in the platform application-data directory (trimmed bundle vs lockfile; `CI` unset so pnpm does not force frozen install) |
 | **Host** | — | `node apps/cli/lib/bin.js web --host 127.0.0.1` |
 | **UI** | Local `shell.html` title bar | Frameless window embeds `dsh web`; Windows controls on the right, macOS on the left, Linux from the window-manager button layout |
@@ -39,10 +39,11 @@ Writable paths live under the platform application-data directory (`%APPDATA%\De
 
 - `harness-versions/<bundle-hash>/` — bundle-specific source + `node_modules` after first `pnpm install`
 - `runtime/` — Node, pnpm-global, manifest
-- `dsh-home/` — session data (`DSH_HOME`)
+- `dsh-home/` — fallback session data when no existing Harness home is found
+- `bin/` — `dsh` shims written onto the Host PATH and, when missing, the user Path
 - `cache/` — downloaded Node zip or tarball
 
-The provisioner selects Node for Windows x64/x86, macOS x64/arm64, and Linux x64/arm64. Zip and tar.gz extraction reject entries outside the expected Node archive root. Unix archives retain executable permissions, and pnpm runs through the downloaded Node binary so first launch does not depend on a system Node installation. Bundle-specific harness directories let an update provision new source without deleting files used by an older running Host; the downloaded Node and pnpm runtimes are reused when their versions remain current. The native shell permits one application instance and focuses the existing window on repeated launches. Release builds check for an update before provisioning; update-network or manifest failures are logged and do not block startup. Window chrome, tray, updater, toast, and completion sound stay in this Rust crate. Host collaboration is an overlay plugin copied into `$DSH_HOME/desktop-overlay` and loaded with `dsh web --patch`; `packages/` is not modified.
+First launch scans `PATH` and well-known install locations for Node `^22.19 || >=24` and a usable pnpm before any mirror fetch. It then adopts `$DSH_HOME` or `~/.dsh` when that directory already holds sessions, credentials, `.env`, profiles, or settings, and copies missing files from the isolated `dsh-home/` into the selected home. It writes `dsh` shims and prepends the selected Node / pnpm directories (plus Git `cmd`/`bin` when `git` or `bash` is missing) onto the Host PATH so `dsh plugin`, MCP `npx`, and agent `bash`/`git` lookups resolve. The user Path receives the shim directory, and the Node or pnpm directory only when that command is still absent. The provisioner still downloads Node for Windows x64/x86, macOS x64/arm64, and Linux x64/arm64 when the scan finds none. Zip and tar.gz extraction reject entries outside the expected Node archive root. Unix archives retain executable permissions. A privately installed pnpm runs through the selected Node binary; a host pnpm is invoked directly. Bundle-specific harness directories let an update provision new source without deleting files used by an older running Host; compatible Node and pnpm runtimes are reused across source updates. The native shell permits one application instance and focuses the existing window on repeated launches. Release builds check for an update before provisioning; update-network or manifest failures are logged and do not block startup. Window chrome, tray, updater, toast, and completion sound stay in this Rust crate. Host collaboration is an overlay plugin copied into `$DSH_HOME/desktop-overlay` and loaded with `dsh web --patch`; `packages/` is not modified.
 
 ## Build
 
@@ -57,7 +58,7 @@ $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD=(Get-Content "$HOME\.tauri\deepseek-desk
 pnpm run build:win
 ```
 
-Installer output: `src-tauri/target/release/bundle/nsis/DeepSeek Harness_0.1.0-rc.5_x64-setup.exe`
+Installer output: `src-tauri/target/release/bundle/nsis/DeepSeek Harness_0.1.0-rc.5-0.1_x64-setup.exe`
 
 The NSIS installer bundles **English**, **Simplified Chinese**, and **Traditional Chinese**. Language follows the OS locale automatically (no language picker); if the locale is unsupported, English is used. Before copying files, the installer silently closes `dsh-desktop.exe` and its child process tree. After installation, it recreates an existing desktop shortcut with the versioned standalone ICO resource and notifies Explorer to invalidate stale icon cache entries.
 
@@ -86,7 +87,7 @@ $env:DSH_DESKTOP_LAUNCH='local'
 pnpm run dev
 ```
 
-**Installed app:** run the NSIS installer; first launch shows splash while Node/pnpm/deps install, then opens the web UI.
+**Installed app:** run the NSIS installer; first launch shows splash while it scans the host, matches an existing `~/.dsh` home, installs missing tools or deps, then opens the web UI.
 
 ## Scripts
 

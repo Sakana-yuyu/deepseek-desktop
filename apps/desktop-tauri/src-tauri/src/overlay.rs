@@ -10,7 +10,7 @@ pub struct OverlayPatch {
     pub patch_file: PathBuf,
 }
 
-/// Copy the overlay plugin into the isolated home and write a `--patch` list.
+/// Copy the overlay plugin into the selected home and write a `--patch` list.
 pub fn install_overlay(
     paths: &RuntimePaths,
     overlay_src: &Path,

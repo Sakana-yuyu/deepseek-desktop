@@ -14,7 +14,11 @@ use super::config::{
     dev_launch_mode, node_mirror_base, npm_registry, DEFAULT_NODE_VERSION, DEFAULT_PNPM_VERSION,
     HARNESS_VERSIONS_DIR,
 };
+use super::host_env::{
+    node_binary_compatible, pnpm_binary_usable, scan_host_toolchain, toolchain_status,
+};
 use super::process::hide_console;
+use super::user_home::{resolve_user_home, user_home_status};
 use super::{app_data_root, ProvisionEvent};
 
 /// Paths to the provisioned build environment and harness tree.
@@ -65,15 +69,32 @@ pub async fn ensure_runtime(
     let bundle_hash = read_bundle_hash(&bundled)?;
     let harness_root = harness_root_for_bundle(&app_root, &bundle_hash);
     let manifest_path = runtime_root.join("manifest.json");
+    let isolated_home = app_data_root()?.join("dsh-home");
 
-    let node_binary = node_binary_path(&node_dir);
-    let pnpm_binary = pnpm_binary_path(&pnpm_home);
+    let preferred_node = node_binary_path(&node_dir);
+    let preferred_pnpm = pnpm_binary_path(&pnpm_home);
     let cli_entry = harness_root
         .join("apps")
         .join("cli")
         .join("lib")
         .join("bin.js");
-    let dsh_home = app_data_root()?.join("dsh-home");
+
+    progress(ProvisionEvent::Status("正在扫描本机 Node / pnpm…".into()));
+    progress(ProvisionEvent::Progress(3));
+    let toolchain = scan_host_toolchain(&preferred_node, &preferred_pnpm);
+    progress(ProvisionEvent::Status(toolchain_status(&toolchain)));
+
+    progress(ProvisionEvent::Status("正在匹配已有对话与密钥…".into()));
+    progress(ProvisionEvent::Progress(8));
+    let user_home = resolve_user_home(&isolated_home)?;
+    let dsh_home = user_home.path.clone();
+    progress(ProvisionEvent::Status(user_home_status(
+        &user_home,
+        &isolated_home,
+    )));
+
+    let mut node_binary = toolchain.node.unwrap_or_else(|| preferred_node.clone());
+    let mut pnpm_binary = toolchain.pnpm.unwrap_or_else(|| preferred_pnpm.clone());
 
     if manifest_ready(
         &manifest_path,
@@ -101,29 +122,35 @@ pub async fn ensure_runtime(
     fs::create_dir_all(&dsh_home).map_err(|e| e.to_string())?;
 
     progress(ProvisionEvent::Status("正在释放 harness 源码…".into()));
-    progress(ProvisionEvent::Progress(5));
+    progress(ProvisionEvent::Progress(12));
     seed_harness_tree(&bundled, &harness_root)?;
 
-    progress(ProvisionEvent::Status(format!(
-        "正在从镜像下载 Node {}…",
-        DEFAULT_NODE_VERSION
-    )));
-    progress(ProvisionEvent::Progress(15));
-    if node_runtime_ready(&node_binary) {
-        boot_log::info("reusing installed Node runtime");
+    if node_binary_compatible(&node_binary) {
+        boot_log::info(&format!("reusing Node {}", node_binary.display()));
+        progress(ProvisionEvent::Status("已复用本机 Node，跳过下载".into()));
+        progress(ProvisionEvent::Progress(30));
     } else {
+        progress(ProvisionEvent::Status(format!(
+            "正在从镜像下载 Node {}…",
+            DEFAULT_NODE_VERSION
+        )));
+        progress(ProvisionEvent::Progress(15));
         fetch_node(&node_dir, DEFAULT_NODE_VERSION, &progress).await?;
+        node_binary = preferred_node;
     }
 
-    progress(ProvisionEvent::Status(format!(
-        "正在从镜像安装 pnpm {}…",
-        DEFAULT_PNPM_VERSION
-    )));
-    progress(ProvisionEvent::Progress(35));
-    if pnpm_binary.is_file() {
-        boot_log::info("reusing installed pnpm runtime");
+    if pnpm_binary_usable(&pnpm_binary) {
+        boot_log::info(&format!("reusing pnpm {}", pnpm_binary.display()));
+        progress(ProvisionEvent::Status("已复用本机 pnpm".into()));
+        progress(ProvisionEvent::Progress(40));
     } else {
-        install_pnpm(&node_binary, &node_dir, &pnpm_home, DEFAULT_PNPM_VERSION)?;
+        progress(ProvisionEvent::Status(format!(
+            "正在安装 pnpm {}…",
+            DEFAULT_PNPM_VERSION
+        )));
+        progress(ProvisionEvent::Progress(35));
+        install_pnpm(&node_binary, &pnpm_home, DEFAULT_PNPM_VERSION)?;
+        pnpm_binary = preferred_pnpm;
     }
 
     progress(ProvisionEvent::Status(
@@ -220,8 +247,8 @@ fn resolve_local_repo() -> Result<RuntimePaths, String> {
         }
     });
 
-    let dsh_home = app_data_root()?.join("dsh-home");
-    fs::create_dir_all(&dsh_home).ok();
+    let isolated_home = app_data_root()?.join("dsh-home");
+    let dsh_home = resolve_user_home(&isolated_home)?.path;
 
     Ok(RuntimePaths {
         node_binary,
@@ -272,24 +299,33 @@ fn harness_root_for_bundle(app_root: &Path, bundle_hash: &str) -> PathBuf {
     app_root.join(HARNESS_VERSIONS_DIR).join(directory)
 }
 
-fn node_runtime_ready(node_binary: &Path) -> bool {
-    if !node_binary.is_file() {
-        return false;
+fn node_distribution_root(node_binary: &Path) -> PathBuf {
+    let parent = node_binary.parent().unwrap_or(node_binary);
+    #[cfg(windows)]
+    {
+        parent.to_path_buf()
     }
-    let mut command = Command::new(node_binary);
-    command
-        .arg("--version")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    hide_console(&mut command);
-    command
-        .output()
-        .map(|output| {
-            output.status.success()
-                && String::from_utf8_lossy(&output.stdout).trim()
-                    == format!("v{DEFAULT_NODE_VERSION}")
-        })
-        .unwrap_or(false)
+    #[cfg(not(windows))]
+    {
+        if parent.file_name().and_then(|name| name.to_str()) == Some("bin") {
+            parent.parent().unwrap_or(parent).to_path_buf()
+        } else {
+            parent.to_path_buf()
+        }
+    }
+}
+
+fn find_npm_cli(node_binary: &Path) -> Option<PathBuf> {
+    let root = node_distribution_root(node_binary);
+    let bundled = root
+        .join(npm_modules_dir())
+        .join("npm")
+        .join("bin")
+        .join("npm-cli.js");
+    if bundled.is_file() {
+        return Some(bundled);
+    }
+    None
 }
 
 fn write_manifest(
@@ -565,30 +601,40 @@ async fn download_file(
     Ok(())
 }
 
-fn install_pnpm(
-    node_binary: &Path,
-    node_dir: &Path,
-    pnpm_home: &Path,
-    version: &str,
-) -> Result<(), String> {
+fn install_pnpm(node_binary: &Path, pnpm_home: &Path, version: &str) -> Result<(), String> {
     if pnpm_home.exists() {
         fs::remove_dir_all(pnpm_home).map_err(|e| e.to_string())?;
     }
     fs::create_dir_all(pnpm_home).map_err(|e| e.to_string())?;
 
-    let npm_cli = node_dir
-        .join(npm_modules_dir())
-        .join("npm")
-        .join("bin")
-        .join("npm-cli.js");
-
     let spec = format!("pnpm@{version}");
     let registry = npm_registry();
-
-    let status = {
+    let status = if let Some(npm_cli) = find_npm_cli(node_binary) {
         let mut cmd = Command::new(node_binary);
         cmd.arg(&npm_cli)
             .arg("install")
+            .arg("-g")
+            .arg(&spec)
+            .arg("--prefix")
+            .arg(pnpm_home)
+            .arg("--registry")
+            .arg(&registry)
+            .arg("--no-audit")
+            .arg("--no-fund")
+            .arg("--loglevel=error");
+        add_node_to_path(&mut cmd, node_binary)?;
+        hide_console(&mut cmd);
+        cmd.status()
+            .map_err(|e| format!("pnpm 安装启动失败: {e}"))?
+    } else {
+        let npm = which::which("npm").or_else(|_| which::which("npm.cmd")).map_err(|_| {
+            format!(
+                "找不到 npm-cli.js 或 npm，无法通过 {} 安装 pnpm",
+                node_binary.display()
+            )
+        })?;
+        let mut cmd = Command::new(npm);
+        cmd.arg("install")
             .arg("-g")
             .arg(&spec)
             .arg("--prefix")
@@ -666,32 +712,36 @@ fn configure_pnpm_install(
     Ok(())
 }
 
+fn pnpm_js_entry(pnpm_binary: &Path) -> Option<PathBuf> {
+    let parent = pnpm_binary.parent()?;
+    let homes = [Some(parent), parent.parent()];
+    for home in homes.into_iter().flatten() {
+        let entry = pnpm_entry_path(home);
+        if entry.is_file() {
+            return Some(entry);
+        }
+    }
+    None
+}
+
 fn pnpm_install_harness(
     node_binary: &Path,
     pnpm_binary: &Path,
     harness_root: &Path,
 ) -> Result<(), String> {
     let registry = npm_registry();
-    let pnpm_home = pnpm_binary
-        .parent()
-        .and_then(|parent| {
-            #[cfg(windows)]
-            {
-                Some(parent)
-            }
-            #[cfg(not(windows))]
-            {
-                parent.parent()
-            }
-        })
-        .ok_or_else(|| format!("invalid pnpm binary path: {}", pnpm_binary.display()))?;
-    let pnpm_entry = pnpm_entry_path(pnpm_home);
-    if !pnpm_entry.is_file() {
-        return Err(format!("pnpm entry is missing: {}", pnpm_entry.display()));
-    }
-
-    let mut cmd = Command::new(node_binary);
-    cmd.arg(&pnpm_entry);
+    let mut cmd = if let Some(entry) = pnpm_js_entry(pnpm_binary) {
+        let mut cmd = Command::new(node_binary);
+        cmd.arg(entry);
+        cmd
+    } else if pnpm_binary_usable(pnpm_binary) {
+        Command::new(pnpm_binary)
+    } else {
+        return Err(format!(
+            "pnpm entry is missing: {}",
+            pnpm_binary.display()
+        ));
+    };
     configure_pnpm_install(&mut cmd, node_binary, harness_root, &registry)?;
 
     let output = cmd

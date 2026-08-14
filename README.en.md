@@ -44,7 +44,7 @@ Upstream owns the agent loop, tools, and Web UI. This fork only adds desktop chr
 | <img src="https://cdn.simpleicons.org/apple/000000" width="22" alt="Tray" /> | System tray | Close hides to tray. Menu shows the window, checks updates, or quits. |
 | <img src="https://cdn.simpleicons.org/github/111827" width="22" alt="Update" /> | Signed auto-update | Startup checks the `desktop-updater` channel and verifies signatures. |
 | <img src="https://cdn.simpleicons.org/googlechat/34A853" width="22" alt="Notify" /> | Task-complete alert | A completed `turn/end` toasts and plays a chime when the window is unfocused. |
-| <img src="https://cdn.simpleicons.org/nodedotjs/5FA04E" width="22" alt="Node" /> | Mirror provision | The installer ships source only. First launch fetches Node / pnpm from npmmirror. |
+| <img src="https://cdn.simpleicons.org/nodedotjs/5FA04E" width="22" alt="Node" /> | Mirror provision | The installer ships source only. First launch scans host Node / pnpm and `~/.dsh`, then fetches from npmmirror only if missing. |
 | <img src="https://cdn.simpleicons.org/rust/000000" width="22" alt="Overlay" /> | Overlay plugin | Host collaboration is a Cordis overlay via `dsh web --patch`, not a `packages/` edit. |
 
 ### Platforms
@@ -62,8 +62,8 @@ Download builds from [Releases](https://github.com/Sakana-yuyu/deepseek-harness-
 ## Quick start
 
 1. Open [GitHub Releases](https://github.com/Sakana-yuyu/deepseek-harness-desktop/releases).
-2. Install **0.1.0-rc.5** for your platform.
-3. First launch downloads Node and production dependencies.
+2. Install **0.1.0-rc.5-0.1** for your platform.
+3. First launch scans host Node / pnpm and an existing `~/.dsh` home, then downloads only what is missing.
 
 ## Community
 

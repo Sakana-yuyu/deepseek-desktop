@@ -45,7 +45,7 @@ English | [中文](README.zh.md)
 | <img src="https://cdn.simpleicons.org/apple/000000" width="22" alt="Tray" /> | 系统托盘 | 关闭窗口隐藏到托盘。菜单可显示窗口、检查更新或退出。 |
 | <img src="https://cdn.simpleicons.org/github/111827" width="22" alt="Update" /> | 签名自动更新 | 启动前检查 `desktop-updater` 通道，校验签名后再安装。 |
 | <img src="https://cdn.simpleicons.org/googlechat/34A853" width="22" alt="Notify" /> | 任务完成提醒 | 一轮 `turn/end` 完成且窗口不在前台时，弹出系统通知并播放完成音。 |
-| <img src="https://cdn.simpleicons.org/nodedotjs/5FA04E" width="22" alt="Node" /> | 镜像预配 | 安装包只带源码。首次启动从 npmmirror 拉取 Node / pnpm 和生产依赖。 |
+| <img src="https://cdn.simpleicons.org/nodedotjs/5FA04E" width="22" alt="Node" /> | 镜像预配 | 安装包只带源码。首次启动先扫描本机 Node / pnpm 和 `~/.dsh`，只在缺失时从 npmmirror 拉取。 |
 | <img src="https://cdn.simpleicons.org/rust/000000" width="22" alt="Overlay" /> | Overlay 插件 | 和 Host 协作的功能写成 Cordis overlay，经 `dsh web --patch` 植入，不改 `packages/`。 |
 
 ### 支持的平台
@@ -69,9 +69,9 @@ English | [中文](README.zh.md)
 ### 1. 下载并安装
 
 1. 打开 [GitHub Releases](https://github.com/Sakana-yuyu/deepseek-harness-desktop/releases)。
-2. 下载当前 **0.1.0-rc.5** 对应平台的安装包。
+2. 下载当前 **0.1.0-rc.5-0.1** 对应平台的安装包。
 3. Windows 如果出现 SmartScreen 提示，确认来源后选择“更多信息”并继续运行。
-4. 首次启动会下载 Node 和生产依赖，后续启动复用已安装的运行时。
+4. 首次启动先扫描本机 Node / pnpm 和已有 `~/.dsh` 对话与密钥，只在缺失时下载运行时和生产依赖，后续启动复用已匹配的环境。
 
 桌面更新在安装前验证签名；Windows 升级会先关闭已有应用进程，再替换文件。已安装的 rc.5 之后会自动发现更高版本。
 

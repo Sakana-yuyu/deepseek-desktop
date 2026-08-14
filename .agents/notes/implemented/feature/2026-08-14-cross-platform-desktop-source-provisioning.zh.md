@@ -10,11 +10,11 @@ Status: implemented
 
 ## 决策
 
-**桌面安装包携带裁剪后的源码树和已构建应用产物，但不携带 `node_modules`。** 首次启动把该只读资源复制到应用数据目录，下载与编译目标操作系统和架构匹配的 Node 压缩包，通过该 Node 运行时安装 pnpm，再在移除 `CI` 的环境中执行 `pnpm install --prod --no-frozen-lockfile`。镜像端点仍可通过 `DSH_NODE_MIRROR` 和 `DSH_NPM_REGISTRY` 配置。
+**桌面安装包携带裁剪后的源码树和已构建应用产物，但不携带 `node_modules`。** 首次启动把该只读资源复制到应用数据目录，先扫描本机是否已有满足 `^22.19 || >=24` 的 Node 和可用的 pnpm，只在扫描失败时下载对应平台的 Node 压缩包，只在需要时通过已选定的 Node 安装 pnpm，再在移除 `CI` 的环境中执行 `pnpm install --prod --no-frozen-lockfile`。镜像端点仍可通过 `DSH_NODE_MIRROR` 和 `DSH_NPM_REGISTRY` 配置。主机匹配与 Harness 主目录采用由[桌面端主机工具链扫描与主目录匹配](2026-08-14-desktop-host-env-and-home-adoption.md)负责。
 
 **每个源码包使用隔离的可写目录。** 内容哈希选择 `harness-versions/<bundle-hash>`，因此更新不会删除旧 Host 正在占用的文件。兼容的 Node 和 pnpm 运行时保持共享，并在源码更新之间复用。原生外壳只允许一个应用实例，再次启动时会聚焦已有窗口。
 
-**下载的运行时负责执行所有预配命令。** Windows x64 和 x86 使用官方 zip 布局；macOS x64/arm64 与 Linux x64/arm64 使用 tar.gz 布局。压缩包条目必须位于预期的带版本 Node 目录之下。tar 解压保留 Unix 权限位，npm 按平台对应的 Node 分发布局解析，pnpm 则由下载的 Node 二进制直接执行其 JavaScript 入口，不依赖 shebang 或主机 `PATH`。
+**已选定的 Node 负责执行所有预配命令。** Windows x64 和 x86 使用官方 zip 布局；macOS x64/arm64 与 Linux x64/arm64 使用 tar.gz 布局。压缩包条目必须位于预期的带版本 Node 目录之下。tar 解压保留 Unix 权限位，npm 按平台对应的 Node 分发布局解析，私有安装的 pnpm 由已选定的 Node 二进制直接执行其 JavaScript 入口。扫描到主机 pnpm 时则直接调用它。
 
 **一个 tag 发布一套完整桌面矩阵和一份签名更新 manifest。** `desktop-v*` tag 构建 Windows x64/x86 NSIS 安装包、macOS Intel/Apple Silicon DMG，以及 Linux x64 AppImage/deb。每个矩阵任务为其 Tauri 更新产物签名并上传带操作系统和架构标识的文件；下游 release 任务先验证集合完整，再创建或更新一个 GitHub 预发布版本，并替换稳定 `desktop-updater` Release 通道中的 `latest.json`。更新公钥内置于应用，私钥和密码只存在于 Release Secrets 和维护者受保护的备份中。更新签名用于验证下载，但可执行文件仍没有操作系统代码签名，也未经过 notarization。
 
@@ -28,7 +28,7 @@ Status: implemented
 
 **携带完整离线依赖树。** 不采用：workspace 依赖闭包会产生很大的安装包和昂贵的文件系统操作。裁剪后的源码包既能保持发布产物较小，也能保留准确的已构建 Harness 应用。
 
-**使用主机上的 Node、npm 或 pnpm。** 不采用：全新 Windows、macOS 和 Linux 系统上的版本、安装路径与可用性各不相同。私有运行时让首次启动只使用一套受控工具链。
+**完全依赖主机工具链、不保留私有回退。** 不采用：全新 Windows、macOS 和 Linux 系统常常没有 Node，或版本不在 `^22.19 || >=24` 范围内。兼容的主机工具链会先被扫描；私有运行时仍是回退。见[桌面端主机工具链扫描与主目录匹配](2026-08-14-desktop-host-env-and-home-adoption.md)。
 
 **让每个矩阵任务分别发布 Release 资产。** 不采用：并发创建 Release 会产生竞态，并可能在其他平台仍在构建时暴露不完整版本。最终任务只在所有必需产物存在后发布。
 
@@ -40,4 +40,4 @@ Status: implemented
 
 ## 后果
 
-安装包保持紧凑，但首次启动需要网络连接，并可能在安装依赖时持续数分钟。运行时文件和依赖占用应用数据目录，而不是安装目录。源码更新期间，旧 Host 仍占用文件时可能暂时保留旧的 bundle 专属目录；后续清理可以移除不活动目录，而不阻塞启动。自动更新要求更高的语义版本，因此替换同一 tag 下的资产只能为手动重装一次该版本的用户启用后续更新。丢失更新私钥或密码会使已安装客户端无法继续信任后续更新。发布工作流需要为完整平台矩阵投入构建时间，并在缺少任一必需包或签名时阻止发布。手动 Windows 安装会强制关闭活动中的应用工作，操作系统安全策略要求时，用户还必须明确批准二进制文件。
+安装包保持紧凑，但本机没有兼容 Node、或捆绑源码树还没有 `node_modules` 时，首次启动仍需要网络连接，并可能持续数分钟。运行时文件和依赖占用应用数据目录，而不是安装目录。源码更新期间，旧 Host 仍占用文件时可能暂时保留旧的 bundle 专属目录；后续清理可以移除不活动目录，而不阻塞启动。自动更新要求更高的语义版本，因此替换同一 tag 下的资产只能为手动重装一次该版本的用户启用后续更新。丢失更新私钥或密码会使已安装客户端无法继续信任后续更新。发布工作流需要为完整平台矩阵投入构建时间，并在缺少任一必需包或签名时阻止发布。手动 Windows 安装会强制关闭活动中的应用工作，操作系统安全策略要求时，用户还必须明确批准二进制文件。

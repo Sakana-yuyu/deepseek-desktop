@@ -1,7 +1,13 @@
 //! Mirror URLs and harness version for first-run provisioning.
 
-/// Default Node LTS aligned with repo engines (^22.19).
+/// Default Node LTS aligned with repo engines (`^22.19 || >=24`).
 pub const DEFAULT_NODE_VERSION: &str = "22.19.0";
+
+/// Lowest accepted Node 22 minor; matches workspace `engines.node`.
+pub const MIN_NODE_MINOR_FOR_22: u64 = 19;
+
+/// Major versions at or above this are accepted without a minor floor.
+pub const MIN_UNRESTRICTED_NODE_MAJOR: u64 = 24;
 
 /// pnpm version aligned with root packageManager.
 pub const DEFAULT_PNPM_VERSION: &str = "11.7.0";

@@ -1,8 +1,11 @@
 pub mod boot_log;
 pub mod config;
+pub mod host_env;
+pub mod path_bridge;
 mod process;
 pub mod provision;
 pub mod supervisor;
+pub mod user_home;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -29,8 +32,9 @@ impl DesktopRuntime {
             paths.cli_entry.display(),
             paths.node_binary.display()
         ));
+        let host_path = path_bridge::prepare_host_path(&paths, |event| progress(event))?;
         progress(ProvisionEvent::Status("正在启动 Web 界面…".into()));
-        let host = supervisor::spawn_web_host(&paths, overlay).await?;
+        let host = supervisor::spawn_web_host(&paths, overlay, &host_path).await?;
         boot_log::info(&format!("dsh web ready url={}", host.web_url));
         Ok(Self {
             paths,

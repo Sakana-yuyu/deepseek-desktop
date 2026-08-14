@@ -36,6 +36,7 @@ pub struct HostOverlay {
 pub async fn spawn_web_host(
     paths: &RuntimePaths,
     overlay: Option<&HostOverlay>,
+    host_path: &str,
 ) -> Result<HostHandle, String> {
     if !paths.cli_entry.is_file() {
         return Err(format!(
@@ -51,7 +52,7 @@ pub async fn spawn_web_host(
         paths.node_binary.display(),
         paths.cli_entry.display()
     ));
-    let child = spawn_child(paths, port, overlay)?;
+    let child = spawn_child(paths, port, overlay, host_path)?;
     let child_handle = Arc::new(Mutex::new(Some(child)));
 
     let stderr_lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
@@ -97,6 +98,7 @@ fn spawn_child(
     paths: &RuntimePaths,
     port: u16,
     overlay: Option<&HostOverlay>,
+    host_path: &str,
 ) -> Result<Child, String> {
     let mut cmd = Command::new(&paths.node_binary);
     cmd.arg(&paths.cli_entry).arg("web");
@@ -109,6 +111,7 @@ fn spawn_child(
         .arg("--port")
         .arg(port.to_string())
         .env("DSH_HOME", &paths.dsh_home)
+        .env("PATH", host_path)
         .env("NODE_ENV", "production")
         .current_dir(&paths.harness_root)
         .stdout(Stdio::piped())
