@@ -42,12 +42,12 @@ jobs:
             asset_arch: x86
           - runner: macos-15-intel
             target: x86_64-apple-darwin
-            bundles: dmg
+            bundles: app,dmg
             asset_platform: macos
             asset_arch: x64
           - runner: macos-15
             target: aarch64-apple-darwin
-            bundles: dmg
+            bundles: app,dmg
             asset_platform: macos
             asset_arch: arm64
           - runner: ubuntu-22.04
