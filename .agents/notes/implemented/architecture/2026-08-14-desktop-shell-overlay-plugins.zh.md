@@ -12,7 +12,7 @@ Status: implemented
 
 **原生标题栏留在 `apps/desktop-tauri`。** 主窗口无边框。本地 `shell.html` 标题栏承载鱼形标志、标题和最小化/最大化/关闭。Windows 把这些按钮放在右侧；macOS 放在左侧；Linux 解析窗口管理器按钮布局（`gsettings` / XFCE，可用 `DSH_DESKTOP_BUTTON_LAYOUT` 覆盖），并允许左右分置。关闭会隐藏窗口；进程留在托盘，直到选择退出。
 
-**与 Host 的协作是 overlay 插件，不是改包。** 外壳把 `overlay/desktop-notify/index.mjs` 复制到 `$DSH_HOME/desktop-overlay`，写入带绝对插件路径的 `--patch` 列表，再启动 `dsh web --patch <该文件>`。插件监听 `session/event` 中 `turn/end` 且 `reason.kind === 'completed'`，并向 `DSH_DESKTOP_NOTIFY_URL` 给出的本机通知 URL 发送 POST。Rust 监听端只在主窗口不在前台时弹出系统通知并播放 `sounds/complete.wav`。
+**与 Host 的协作是 overlay 插件，不是改包。** 外壳把 `overlay/desktop-notify/index.mjs` 复制到 `$DSH_HOME/desktop-overlay`，写入插件 `name` 为 `file://` URL 的 `--patch` 列表，再启动 `dsh web --patch <该文件>`。Windows 盘符路径（如 `C:/...`）不是合法 ESM specifier——Node 会把 `C:` 当成 URL scheme——因此 overlay 必须写成 `file:///C:/...`（空格做百分号编码）。插件监听 `session/event` 中 `turn/end` 且 `reason.kind === 'completed'`，并向 `DSH_DESKTOP_NOTIFY_URL` 给出的本机通知 URL 发送 POST。Rust 监听端只在主窗口不在前台时弹出系统通知并播放 `sounds/complete.wav`。
 
 **更新仍使用带签名的 Tauri updater。** 启动时仍在预配前检查。托盘「检查更新」按需运行同一套签名检查。
 

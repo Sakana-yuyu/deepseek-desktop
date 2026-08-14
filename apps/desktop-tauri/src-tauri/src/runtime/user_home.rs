@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::boot_log;
+use super::env_path::{durable_dsh_home, path_eq};
 
 const HOME_DIR_NAME: &str = ".dsh";
 const SKIP_IMPORT: &[&str] = &["desktop-overlay"];
@@ -39,7 +40,7 @@ fn adopt_homes(isolated: &Path, homes: Vec<PathBuf>) -> Result<ResolvedUserHome,
 
     let mut imported = 0usize;
     for source in &homes {
-        if source == &selected {
+        if path_eq(source, &selected) {
             continue;
         }
         imported += import_missing(source, &selected)?;
@@ -81,7 +82,7 @@ pub fn is_harness_home(path: &Path) -> bool {
 
 /// Copy `from` into `to` without replacing files that already exist.
 pub fn import_missing(from: &Path, to: &Path) -> Result<usize, String> {
-    if !from.is_dir() || from == to {
+    if !from.is_dir() || path_eq(from, to) {
         return Ok(0);
     }
     fs::create_dir_all(to).map_err(|e| e.to_string())?;
@@ -111,35 +112,18 @@ fn discover_harness_homes(isolated: &Path) -> Vec<PathBuf> {
 }
 
 fn env_dsh_home() -> Option<PathBuf> {
-    let raw = std::env::var("DSH_HOME").ok()?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(expand_home_prefix(trimmed))
+    durable_dsh_home()
 }
 
 fn default_cli_home() -> Option<PathBuf> {
     Some(dirs::home_dir()?.join(HOME_DIR_NAME))
 }
 
-fn expand_home_prefix(path: &str) -> PathBuf {
-    if path == "~" {
-        return dirs::home_dir().unwrap_or_else(|| PathBuf::from(path));
-    }
-    if let Some(rest) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
-    }
-    PathBuf::from(path)
-}
-
 fn push_unique(homes: &mut Vec<PathBuf>, candidate: Option<PathBuf>) {
     let Some(path) = candidate else {
         return;
     };
-    if !homes.iter().any(|existing| existing == &path) {
+    if !homes.iter().any(|existing| path_eq(existing, &path)) {
         homes.push(path);
     }
 }
@@ -190,11 +174,16 @@ fn copy_tree(source: &Path, dest: &Path) -> Result<(), String> {
 
 fn display_home(path: &Path) -> String {
     if let Some(home) = dirs::home_dir() {
-        if path == home.join(HOME_DIR_NAME) {
+        if path_eq(path, &home.join(HOME_DIR_NAME)) {
             return format!("~/{HOME_DIR_NAME}");
         }
     }
-    "$DSH_HOME".into()
+    if let Some(configured) = durable_dsh_home() {
+        if path_eq(path, &configured) {
+            return "$DSH_HOME".into();
+        }
+    }
+    path.display().to_string()
 }
 
 #[cfg(test)]

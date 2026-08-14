@@ -233,10 +233,11 @@ fn resolve_local_repo() -> Result<RuntimePaths, String> {
         ));
     }
 
-    let node_binary = which::which("node")
-        .map_err(|_| "找不到 node；请安装 Node ^22.19 或设置 PATH".to_string())?;
-
-    let pnpm_binary = which::which("pnpm").unwrap_or_else(|_| {
+    let toolchain = scan_host_toolchain(Path::new("node"), Path::new("pnpm"));
+    let node_binary = toolchain.node.ok_or_else(|| {
+        "找不到兼容 Node；请安装 Node ^22.19 或 >=24，或设置 PATH".to_string()
+    })?;
+    let pnpm_binary = toolchain.pnpm.unwrap_or_else(|| {
         #[cfg(windows)]
         {
             PathBuf::from("pnpm.cmd")

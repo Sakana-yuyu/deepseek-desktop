@@ -42,11 +42,14 @@ pub fn install_overlay(
 
 fn normalize_plugin_path(path: &Path) -> Result<String, String> {
     let canonical = path.canonicalize().map_err(|e| e.to_string())?;
-    let mut text = canonical.to_string_lossy().replace('\\', "/");
-    if let Some(stripped) = text.strip_prefix("//?/") {
-        text = stripped.to_string();
-    }
-    Ok(text)
+    url::Url::from_file_path(&canonical)
+        .map(|file_url| file_url.as_str().to_string())
+        .map_err(|()| {
+            format!(
+                "plugin path is not a usable file URL: {}",
+                canonical.display()
+            )
+        })
 }
 
 /// Resolve the overlay source shipped beside the desktop shell.
@@ -71,9 +74,9 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn writes_an_absolute_patch_row_without_backslashes() {
+    fn writes_a_file_url_patch_row_that_node_esm_can_import() {
         let root = std::env::temp_dir().join(format!(
-            "dsh-desktop-overlay-{}",
+            "dsh desktop overlay {}",
             std::process::id()
         ));
         let _ = fs::remove_dir_all(&root);
@@ -92,12 +95,14 @@ mod tests {
 
         let overlay = install_overlay(&paths, &root.join("src"), "http://127.0.0.1:9/notify").unwrap();
         let yaml = fs::read_to_string(&overlay.patch_file).unwrap();
-        assert!(yaml.contains("id: dsh-desktop-notify"));
-        assert!(yaml.contains("name: '"));
-        assert!(!yaml.contains('\\'));
         let plugin = dsh_home.join("desktop-overlay").join("index.mjs");
+        let plugin_url = normalize_plugin_path(&plugin).unwrap();
         assert!(plugin.is_file());
-        assert!(!normalize_plugin_path(&plugin).unwrap().contains('\\'));
+        assert!(plugin_url.starts_with("file://"), "{plugin_url}");
+        assert!(plugin_url.contains("%20"), "{plugin_url}");
+        assert!(!plugin_url.contains('\\'), "{plugin_url}");
+        assert!(yaml.contains("id: dsh-desktop-notify"));
+        assert!(yaml.contains(&format!("name: '{plugin_url}'")), "{yaml}");
         let _ = fs::remove_dir_all(&root);
     }
 }

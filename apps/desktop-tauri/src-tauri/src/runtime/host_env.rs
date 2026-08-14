@@ -6,6 +6,7 @@ use std::process::{Command, Stdio};
 use super::config::{
     DEFAULT_NODE_VERSION, MIN_NODE_MINOR_FOR_22, MIN_UNRESTRICTED_NODE_MAJOR,
 };
+use super::env_path::which_on_host;
 use super::process::hide_console;
 
 /// Host toolchain selected for provisioning and Host startup.
@@ -62,7 +63,13 @@ pub fn pnpm_binary_usable(path: &Path) -> bool {
 /// Scan PATH and well-known install locations after checking a preferred runtime.
 pub fn scan_host_toolchain(preferred_node: &Path, preferred_pnpm: &Path) -> HostToolchain {
     let node = first_compatible_node(node_candidates(preferred_node));
-    let pnpm = first_usable_pnpm(pnpm_candidates(preferred_pnpm));
+    let mut pnpm_paths = pnpm_candidates(preferred_pnpm);
+    if let Some(node) = &node {
+        if let Some(dir) = node.parent() {
+            pnpm_paths.extend(sibling_pnpm_paths(dir));
+        }
+    }
+    let pnpm = first_usable_pnpm(dedup_paths(pnpm_paths));
     HostToolchain { node, pnpm }
 }
 
@@ -123,9 +130,19 @@ fn pnpm_candidates(preferred: &Path) -> Vec<PathBuf> {
 }
 
 fn push_which(candidates: &mut Vec<PathBuf>, name: &str) {
-    if let Ok(path) = which::which(name) {
+    if let Some(path) = which_on_host(name) {
         candidates.push(path);
     }
+}
+
+fn sibling_pnpm_paths(node_dir: &Path) -> Vec<PathBuf> {
+    let mut paths = vec![node_dir.join("pnpm")];
+    #[cfg(windows)]
+    {
+        paths.push(node_dir.join("pnpm.cmd"));
+        paths.push(node_dir.join("pnpm.exe"));
+    }
+    paths
 }
 
 fn well_known_node_paths() -> Vec<PathBuf> {
@@ -135,8 +152,10 @@ fn well_known_node_paths() -> Vec<PathBuf> {
         push_env_join(&mut paths, "ProgramFiles", &["nodejs", "node.exe"]);
         push_env_join(&mut paths, "ProgramFiles(x86)", &["nodejs", "node.exe"]);
         push_env_join(&mut paths, "NVM_SYMLINK", &["node.exe"]);
+        push_env_join(&mut paths, "NVM_HOME", &["node.exe"]);
         push_home_join(&mut paths, &[".volta", "bin", "node.exe"]);
         push_home_join(&mut paths, &["scoop", "apps", "nodejs", "current", "node.exe"]);
+        push_env_join(&mut paths, "LOCALAPPDATA", &["fnm", "aliases", "default", "node.exe"]);
     }
     #[cfg(not(windows))]
     {
@@ -154,7 +173,9 @@ fn well_known_pnpm_paths() -> Vec<PathBuf> {
     #[cfg(windows)]
     {
         push_env_join(&mut paths, "LOCALAPPDATA", &["pnpm", "pnpm.exe"]);
+        push_env_join(&mut paths, "LOCALAPPDATA", &["pnpm", "pnpm.cmd"]);
         push_env_join(&mut paths, "APPDATA", &["npm", "pnpm.cmd"]);
+        push_env_join(&mut paths, "APPDATA", &["npm", "pnpm.exe"]);
         push_home_join(&mut paths, &[".volta", "bin", "pnpm.exe"]);
     }
     #[cfg(not(windows))]

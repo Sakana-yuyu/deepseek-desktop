@@ -10,7 +10,7 @@ Status: implemented
 
 ## 决策
 
-**预配在任何镜像下载之前先扫描主机。** 外壳探测私有运行时、`PATH` 和常见 Node/pnpm 安装位置。满足 `^22.19 || >=24` 的 Node 会被复用于 Host 启动和 `pnpm install`。可用的 pnpm 同样复用。只有扫描不到兼容 Node 时才下载私有 Node 压缩包；只有找不到可用 pnpm 时，才通过已选定的 Node 安装 pnpm。这是对[跨平台桌面源码预配](2026-08-14-cross-platform-desktop-source-provisioning.md)的延伸，回退下载路径不变。
+**预配在任何镜像下载之前先扫描主机。** 外壳探测私有运行时、进程 `PATH` 和常见 Node/pnpm 安装位置。在 Windows 上还会读取用户/系统环境中的持久 Path（以及 `DSH_HOME`），因为从开始菜单启动时，GUI 进程 PATH 常常是过期的。满足 `^22.19 || >=24` 的 Node 会被复用于 Host 启动和 `pnpm install`。可用的 pnpm 同样复用，包括选定 Node 旁边的 Corepack shim。只有扫描不到兼容 Node 时才下载私有 Node 压缩包；只有找不到可用 pnpm 时，才通过已选定的 Node 安装 pnpm。这是对[跨平台桌面源码预配](2026-08-14-cross-platform-desktop-source-provisioning.md)的延伸，回退下载路径不变。
 
 **Host 匹配已有 Harness 主目录，而不是始终使用 `dsh-home/`。** 选择顺序为：已包含 Harness 数据的 `$DSH_HOME`，然后是 `~/.dsh`，最后才是隔离的应用数据主目录。目录中存在 `sessions`、`.credentials.yaml`、`.env`、`profiles` 或 `settings.yaml` / `.yml` / `.json` 时，即视为 Harness 主目录。其他已发现主目录中缺失的文件和会话目录会复制进选定主目录；已有文件保持不动。`desktop-overlay` 从不导入，因为外壳会重新生成它。
 

@@ -10,9 +10,9 @@ Status: implemented
 
 ## 决策
 
-**外壳写入 `dsh` shim，并把所有必需 CLI 目录前置到 Host PATH。** `%APPDATA%\DeepSeek Harness\bin`（或平台应用数据目录下的 `bin`）写入 `dsh.cmd` 和一份 `dsh` shell 脚本，二者都 exec 已选定的 Node 与 `apps/cli/lib/bin.js`。Host 子进程 PATH 前置该 bin 目录、已选定 Node 目录（`node` / `npm` / `npx`）、已选定 pnpm 目录，以及在 `git` 或 `bash` 尚不可解析时的常见 Git `cmd`/`bin` 目录。ripgrep 仍打包在 `@vscode/ripgrep` 内，不加入 PATH。可选的第三方 CLI（`claude`、`codex`、`tmux`）不植入。
+**外壳写入 `dsh` shim，并把所有必需 CLI 目录前置到 Host PATH。** `%APPDATA%\DeepSeek Harness\bin`（或平台应用数据目录下的 `bin`）写入 `dsh.cmd` 和一份 `dsh` shell 脚本，二者都 exec 已选定的 Node 与 `apps/cli/lib/bin.js`。Host 子进程 PATH 从发现 PATH（进程 PATH，Windows 上再加上用户/系统持久 Path）出发，再前置该 bin 目录、已选定 Node 目录（`node` / `npm` / `npx`）、已选定 pnpm 目录，以及在发现 PATH 上仍解析不到 `git` 或 `bash` 时的常见 Git `cmd`/`bin` 目录。ripgrep 仍打包在 `@vscode/ripgrep` 内，不加入 PATH。可选的第三方 CLI（`claude`、`codex`、`tmux`）不植入。
 
-**用户 PATH 只补仍然缺失的项。** Windows 把 shim 目录追加到 HKCU 用户 Path；仅当对应命令不存在时，才追加 Node 或 pnpm 目录。Unix 把 `dsh` shim 复制到 `~/.local/bin`，若该目录还不在 PATH 上，则向 `~/.zprofile`（macOS）或 `~/.profile`（Linux）追加带标记的 `export PATH` 块。已有 Path 条目不会被重排或删除。
+**用户 PATH 只补仍然缺失的项。** Windows 把 shim 目录追加到 HKCU 用户 Path；仅当发现 PATH 上仍没有对应命令时，才追加 Node 或 pnpm 目录。Unix 把 `dsh` shim 复制到 `~/.local/bin`，若该目录还不在 PATH 上，则向 `~/.zprofile`（macOS）或 `~/.profile`（Linux）追加带标记的 `export PATH` 块。已有 Path 条目不会被重排或删除。
 
 这建立在[桌面端主机工具链扫描与主目录匹配](2026-08-14-desktop-host-env-and-home-adoption.md)之上：同一次选定的 Node 和 pnpm 同时供给扫描和 shim。
 

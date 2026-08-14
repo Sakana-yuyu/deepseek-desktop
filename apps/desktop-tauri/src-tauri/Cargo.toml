@@ -1,6 +1,6 @@
 [package]
 name = "dsh-desktop"
-version = "0.1.0-rc.5-0.1"
+version = "0.1.0-rc.5-0.2"
 description = "DeepSeek Harness desktop shell (Tauri)"
 authors = ["DeepSeek"]
 edition = "2021"
@@ -29,6 +29,7 @@ futures-util = "0.3"
 flate2 = "1"
 tar = "0.4"
 tauri-plugin-updater = "2"
+url = "2"
 
 [profile.release]
 strip = true

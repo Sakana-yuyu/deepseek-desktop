@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::boot_log;
+use super::env_path::{discovery_path, path_eq, which_on_host};
 use super::provision::RuntimePaths;
 use super::{app_data_root, ProvisionEvent};
 
@@ -39,7 +40,7 @@ pub fn prepare_host_path(
     if let Err(error) = persist_user_path(&bridge) {
         boot_log::info(&format!("user PATH persist skipped: {error}"));
     }
-    let merged = merge_path(std::env::var_os("PATH"), &bridge.prepend);
+    let merged = merge_path(Some(discovery_path()), &bridge.prepend);
     boot_log::info(&format!(
         "path bridge bin={} prepend={}",
         bridge.bin_dir.display(),
@@ -127,10 +128,10 @@ fn write_dsh_shims(bin_dir: &Path, node: &Path, cli_entry: &Path) -> Result<(), 
 
 fn companion_tool_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
-    if which::which("git").is_err() {
+    if which_on_host("git").is_none() {
         dirs.extend(existing_tool_dirs(well_known_git_dirs(), "git"));
     }
-    if which::which("bash").is_err() {
+    if which_on_host("bash").is_none() {
         dirs.extend(existing_tool_dirs(well_known_bash_dirs(), "bash"));
     }
     dirs
@@ -201,7 +202,7 @@ fn persist_windows_user_path_if_missing(
     let Some(dir) = dir else {
         return Ok(());
     };
-    if names.iter().any(|name| which::which(name).is_ok()) {
+    if names.iter().any(|name| which_on_host(name).is_some()) {
         return Ok(());
     }
     persist_windows_user_path(dir)
@@ -353,16 +354,6 @@ fn path_string_contains(path: &str, candidate: &Path) -> bool {
     std::env::split_paths(path).any(|dir| path_eq(&dir, candidate))
 }
 
-fn path_eq(left: &Path, right: &Path) -> bool {
-    #[cfg(windows)]
-    {
-        left.to_string_lossy().eq_ignore_ascii_case(&right.to_string_lossy())
-    }
-    #[cfg(not(windows))]
-    {
-        left == right
-    }
-}
 
 #[cfg(test)]
 mod tests {
