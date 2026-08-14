@@ -26,8 +26,17 @@ impl Drop for HostHandle {
     }
 }
 
+/// Extra Host flags the desktop shell injects without editing Harness packages.
+pub struct HostOverlay {
+    pub patch_file: std::path::PathBuf,
+    pub notify_url: String,
+}
+
 /// Spawn `dsh web --host 127.0.0.1 --port <port>` and wait until HTTP responds.
-pub async fn spawn_web_host(paths: &RuntimePaths) -> Result<HostHandle, String> {
+pub async fn spawn_web_host(
+    paths: &RuntimePaths,
+    overlay: Option<&HostOverlay>,
+) -> Result<HostHandle, String> {
     if !paths.cli_entry.is_file() {
         return Err(format!(
             "harness CLI 缺失: {} — 请确认安装包内已包含 apps/cli/lib",
@@ -42,7 +51,7 @@ pub async fn spawn_web_host(paths: &RuntimePaths) -> Result<HostHandle, String> 
         paths.node_binary.display(),
         paths.cli_entry.display()
     ));
-    let child = spawn_child(paths, port)?;
+    let child = spawn_child(paths, port, overlay)?;
     let child_handle = Arc::new(Mutex::new(Some(child)));
 
     let stderr_lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
@@ -84,11 +93,18 @@ pub async fn spawn_web_host(paths: &RuntimePaths) -> Result<HostHandle, String> 
     })
 }
 
-fn spawn_child(paths: &RuntimePaths, port: u16) -> Result<Child, String> {
+fn spawn_child(
+    paths: &RuntimePaths,
+    port: u16,
+    overlay: Option<&HostOverlay>,
+) -> Result<Child, String> {
     let mut cmd = Command::new(&paths.node_binary);
-    cmd.arg(&paths.cli_entry)
-        .arg("web")
-        .arg("--host")
+    cmd.arg(&paths.cli_entry).arg("web");
+    if let Some(overlay) = overlay {
+        cmd.arg("--patch").arg(&overlay.patch_file);
+        cmd.env("DSH_DESKTOP_NOTIFY_URL", &overlay.notify_url);
+    }
+    cmd.arg("--host")
         .arg("127.0.0.1")
         .arg("--port")
         .arg(port.to_string())

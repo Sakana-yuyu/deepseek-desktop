@@ -1,25 +1,27 @@
+mod chrome;
+mod notify;
+mod overlay;
 mod runtime;
+mod tray;
 mod updater;
+mod window_layout;
 
 use runtime::boot_log;
 use runtime::config::BUNDLED_HARNESS_DIR;
+use runtime::provision::ensure_runtime;
+use runtime::supervisor::HostOverlay;
 use runtime::{DesktopRuntime, ProvisionEvent};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            let window = app
-                .get_webview_window("main")
-                .or_else(|| app.get_webview_window("splash"));
-            if let Some(window) = window {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            chrome::show_main(app);
         }))
         .setup(|app| {
             let handle = app.handle().clone();
@@ -27,9 +29,10 @@ pub fn run() {
                 .default_window_icon()
                 .cloned()
                 .ok_or("default window icon is missing")?;
-            app.get_webview_window("splash")
-                .ok_or("splash window is missing")?
-                .set_icon(icon)?;
+            if let Some(splash) = app.get_webview_window("splash") {
+                splash.set_icon(icon)?;
+            }
+            tray::install(&handle)?;
             let bundled = resolve_bundled_source(&handle);
             tauri::async_runtime::spawn(async move {
                 if let Err(err) = boot_app(handle.clone(), bundled).await {
@@ -85,47 +88,30 @@ async fn boot_app(app: AppHandle, bundled: Option<PathBuf>) -> Result<(), String
         progress(ProvisionEvent::Status("更新检查失败，正在继续启动…".into()));
     }
 
-    let runtime = DesktopRuntime::boot(bundled, progress).await?;
+    let notify = notify::start(app.clone())?;
+    let paths = ensure_runtime(bundled, {
+        let progress = Arc::clone(&progress);
+        move |event| progress(event)
+    })
+    .await?;
+
+    let overlay_src = overlay::resolve_overlay_source(app.path().resource_dir().ok().as_deref());
+    let implanted = overlay::install_overlay(&paths, &overlay_src, &notify.url)?;
+    let host_overlay = HostOverlay {
+        patch_file: implanted.patch_file,
+        notify_url: notify.url.clone(),
+    };
+
+    let runtime = DesktopRuntime::start(paths, Some(&host_overlay), progress).await?;
     let web_url = runtime.web_url.clone();
-    // Keep the child process alive for the app lifetime; dropping `DesktopRuntime`
-    // would kill `dsh web` via `HostHandle::drop`.
     app.manage(runtime);
+    app.manage(notify);
     boot_log::info(&format!("opening main window url={web_url}"));
-    open_main_window(&app, &web_url)?;
+    chrome::open_main_window(&app, &web_url)?;
     if let Some(splash) = app.get_webview_window("splash") {
         let _ = splash.close();
     }
     boot_log::info("boot complete");
-    Ok(())
-}
-
-fn open_main_window(app: &AppHandle, url: &str) -> Result<(), String> {
-    if app.get_webview_window("main").is_some() {
-        return Ok(());
-    }
-
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .ok_or_else(|| "default window icon is missing".to_string())?;
-    let builder = WebviewWindowBuilder::new(
-        app,
-        "main",
-        WebviewUrl::External(url.parse().map_err(|e| format!("invalid web url: {e}"))?),
-    )
-    .title("DeepSeek Harness")
-    .inner_size(1280.0, 860.0)
-    .center()
-    .visible(false);
-    let window = builder
-        .icon(icon)
-        .map_err(|e| e.to_string())?
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    window.show().map_err(|e| e.to_string())?;
-    window.set_focus().map_err(|e| e.to_string())?;
-
     Ok(())
 }
 

@@ -10,6 +10,7 @@
     "beforeBuildCommand": "node scripts/prepare-dist.mjs"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "label": "splash",
@@ -18,7 +19,7 @@
         "height": 300,
         "resizable": false,
         "center": true,
-        "decorations": true,
+        "decorations": false,
         "url": "splash.html"
       }
     ],
@@ -30,7 +31,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIyOTU4Q0I3RkU0OTUzOEMKUldTTVUwbit0NHlWSWxwMDJ2TzQreUZ4cVFqejg1R0JpYU9tdWxPQlR5L1ViSjRKaVlML2x0UXcK",
       "endpoints": [
-        "https://github.com/Sakana-yuyu/deepseek-desktop/releases/download/desktop-updater/latest.json"
+        "https://github.com/Sakana-yuyu/deepseek-harness-desktop/releases/download/desktop-updater/latest.json"
       ],
       "windows": {
         "installMode": "passive"
@@ -53,6 +54,8 @@
     ],
     "resources": {
       "../bundled/harness": "harness-source",
+      "../overlay/desktop-notify": "desktop-overlay",
+      "../sounds/complete.wav": "complete.wav",
       "icons/icon.ico": "deepseek-harness-icon-0.1.0-rc.5.ico"
     },
     "windows": {

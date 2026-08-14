@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DeepSeek Harness</title>
+  <style>
+    :root {
+      --titlebar-height: 36px;
+      --bg: #0f1117;
+      --line: #252a36;
+      --text: #e6e8ef;
+      --muted: #9aa3b5;
+      --hover: #1b2030;
+      --close-hover: #e81123;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); }
+    body {
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      display: flex;
+      flex-direction: column;
+    }
+    #titlebar {
+      height: var(--titlebar-height);
+      min-height: var(--titlebar-height);
+      display: flex;
+      align-items: stretch;
+      border-bottom: 1px solid var(--line);
+      user-select: none;
+    }
+    .cluster {
+      display: flex;
+      align-items: stretch;
+      flex: 0 0 auto;
+    }
+    .drag {
+      flex: 1 1 auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      padding: 0 12px;
+    }
+    .drag img { width: 16px; height: 16px; flex: 0 0 auto; }
+    .drag span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+    }
+    button.ctl {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--text);
+      width: 46px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    button.ctl:hover { background: var(--hover); }
+    button.ctl.close:hover { background: var(--close-hover); color: #fff; }
+    button.ctl svg { width: 10px; height: 10px; display: block; }
+    body.macos { --titlebar-height: 32px; }
+    body.macos .cluster.left { padding-left: 8px; gap: 8px; align-items: center; }
+    body.macos button.ctl {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      margin: 0 3px;
+      align-self: center;
+    }
+    body.macos button.ctl svg { display: none; }
+    body.macos button.ctl.close { background: #ff5f57; }
+    body.macos button.ctl.minimize { background: #febc2e; }
+    body.macos button.ctl.maximize { background: #28c840; }
+    body.macos button.ctl:hover { filter: brightness(1.05); }
+    iframe {
+      flex: 1 1 auto;
+      width: 100%;
+      border: 0;
+      background: var(--bg);
+    }
+  </style>
+</head>
+<body>
+  <header id="titlebar">
+    <div class="cluster left" id="left"></div>
+    <div class="drag" data-tauri-drag-region>
+      <img src="app-icon.png" alt="" data-tauri-drag-region />
+      <span data-tauri-drag-region>DeepSeek Harness</span>
+    </div>
+    <div class="cluster right" id="right"></div>
+  </header>
+  <iframe id="app" title="DeepSeek Harness"></iframe>
+  <script>
+    const icons = {
+      minimize: '<svg viewBox="0 0 10 10" aria-hidden="true"><rect x="1" y="5" width="8" height="1" fill="currentColor"/></svg>',
+      maximize: '<svg viewBox="0 0 10 10" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1"/></svg>',
+      close: '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2 L8 8 M8 2 L2 8" stroke="currentColor" stroke-width="1.2"/></svg>',
+    }
+    const labels = { minimize: '最小化', maximize: '最大化', close: '关闭到托盘' }
+
+    function button(kind) {
+      const el = document.createElement('button')
+      el.className = `ctl ${kind}`
+      el.type = 'button'
+      el.innerHTML = icons[kind]
+      el.title = labels[kind]
+      el.addEventListener('click', async () => {
+        const api = window.__TAURI__
+        if (!api) return
+        const current = api.window.getCurrentWindow()
+        if (kind === 'minimize') await current.minimize()
+        if (kind === 'maximize') await current.toggleMaximize()
+        if (kind === 'close') await current.hide()
+      })
+      return el
+    }
+
+    function render(layout) {
+      document.body.classList.toggle('macos', layout.os === 'macos')
+      document.documentElement.style.setProperty('--titlebar-height', `${layout.titlebar_height}px`)
+      const left = document.getElementById('left')
+      const right = document.getElementById('right')
+      left.replaceChildren(...layout.left.map(button))
+      right.replaceChildren(...layout.right.map(button))
+    }
+
+    async function boot() {
+      const url = window.__DSH_WEB_URL__
+      if (url) document.getElementById('app').src = url
+      const layout = window.__DSH_CHROME__ || {
+        os: 'windows',
+        titlebar_height: 36,
+        left: [],
+        right: ['minimize', 'maximize', 'close'],
+      }
+      render(layout)
+    }
+
+    boot()
+  </script>
+</body>
+</html>

@@ -14,7 +14,9 @@ Current desktop prerelease: **0.1.0-rc.5**.
 | **Build env** | — | Node (npmmirror), pnpm (via npm + npmmirror registry) |
 | **Dependencies** | — | `pnpm install --prod --no-frozen-lockfile` in the platform application-data directory (trimmed bundle vs lockfile; `CI` unset so pnpm does not force frozen install) |
 | **Host** | — | `node apps/cli/lib/bin.js web --host 127.0.0.1` |
-| **UI** | — | WebView2 → `http://127.0.0.1:17890` (existing React web client) |
+| **UI** | Local `shell.html` title bar | Frameless window embeds `dsh web`; Windows controls on the right, macOS on the left, Linux from the window-manager button layout |
+| **Tray** | Native tray icon | Close hides to tray; menu shows the window, checks for updates, or quits |
+| **Notify** | Overlay plugin + localhost POST | `turn/end` with `completed` shows a toast and plays `sounds/complete.wav` when the window is unfocused |
 | **Updates** | Embedded updater public key | Check the stable GitHub update manifest, verify the downloaded artifact signature, install, and restart |
 
 Bundled tree includes: `apps/cli` (with built `lib/`), `apps/web` (with `dist/`), `packages/*/*` (excluding examples and test-support), `native/landlock-run`, `vendor/*`, `patches/`, lockfile — **not** the old 900k-junction offline runtime. Workspace `devDependencies` are stripped at bundle time so `--prod` install does not require demo packages.
@@ -40,7 +42,7 @@ Writable paths live under the platform application-data directory (`%APPDATA%\De
 - `dsh-home/` — session data (`DSH_HOME`)
 - `cache/` — downloaded Node zip or tarball
 
-The provisioner selects Node for Windows x64/x86, macOS x64/arm64, and Linux x64/arm64. Zip and tar.gz extraction reject entries outside the expected Node archive root. Unix archives retain executable permissions, and pnpm runs through the downloaded Node binary so first launch does not depend on a system Node installation. Bundle-specific harness directories let an update provision new source without deleting files used by an older running Host; the downloaded Node and pnpm runtimes are reused when their versions remain current. The native shell permits one application instance and focuses the existing window on repeated launches. Release builds check for an update before provisioning; update-network or manifest failures are logged and do not block startup.
+The provisioner selects Node for Windows x64/x86, macOS x64/arm64, and Linux x64/arm64. Zip and tar.gz extraction reject entries outside the expected Node archive root. Unix archives retain executable permissions, and pnpm runs through the downloaded Node binary so first launch does not depend on a system Node installation. Bundle-specific harness directories let an update provision new source without deleting files used by an older running Host; the downloaded Node and pnpm runtimes are reused when their versions remain current. The native shell permits one application instance and focuses the existing window on repeated launches. Release builds check for an update before provisioning; update-network or manifest failures are logged and do not block startup. Window chrome, tray, updater, toast, and completion sound stay in this Rust crate. Host collaboration is an overlay plugin copied into `$DSH_HOME/desktop-overlay` and loaded with `dsh web --patch`; `packages/` is not modified.
 
 ## Build
 
@@ -93,3 +95,4 @@ pnpm run dev
 | `scripts/bundle-harness-source.mjs` | Trim + copy monorepo slice → `bundled/harness/` |
 | `scripts/prepare-dist.mjs` | Splash dist + bundle (Tauri `beforeBuildCommand`) |
 | `scripts/serve-dist.mjs` | Static server for `tauri dev` splash |
+| `overlay/desktop-notify/` | Cordis overlay: POST completed turns to the native notify port |

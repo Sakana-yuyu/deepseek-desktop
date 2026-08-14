@@ -17,6 +17,7 @@
       justify-content: center;
       padding: 2rem;
     }
+    body, h1, #status { -webkit-app-region: drag; }
     h1 { font-size: 1.25rem; font-weight: 600; margin-bottom: 0.5rem; }
     #status { font-size: 0.875rem; color: #9aa3b5; text-align: center; max-width: 28rem; line-height: 1.5; }
     progress {
@@ -34,7 +35,7 @@
     #error { color: #f87171; margin-top: 1rem; font-size: 0.8125rem; display: none; white-space: pre-wrap; text-align: center; max-width: 28rem; }
   </style>
 </head>
-<body>
+<body data-tauri-drag-region>
   <h1>DeepSeek Harness</h1>
   <p id="status">正在准备运行环境…</p>
   <progress id="bar" value="0" max="100"></progress>

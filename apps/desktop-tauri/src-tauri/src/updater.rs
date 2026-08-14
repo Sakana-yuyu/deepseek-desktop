@@ -48,3 +48,26 @@ pub async fn install_available(
 
     app.restart();
 }
+
+/// Check for a signed update from the tray. Debug builds skip the network.
+pub async fn check_now(app: &AppHandle) -> Result<String, String> {
+    if cfg!(debug_assertions) {
+        return Ok("开发构建不检查桌面更新".into());
+    }
+
+    let Some(update) = app
+        .updater()
+        .map_err(|error| error.to_string())?
+        .check()
+        .await
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok("当前已是最新版本".into());
+    };
+
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|error| error.to_string())?;
+    app.restart()
+}

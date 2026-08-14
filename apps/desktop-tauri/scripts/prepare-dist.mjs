@@ -10,6 +10,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const dist = join(root, 'dist')
 mkdirSync(dist, { recursive: true })
 cpSync(join(root, 'splash.html'), join(dist, 'splash.html'))
+cpSync(join(root, 'shell.html'), join(dist, 'shell.html'))
+cpSync(join(root, 'app-icon.png'), join(dist, 'app-icon.png'))
 
 const bundleScript = join(root, 'scripts', 'bundle-harness-source.mjs')
 const result = spawnSync(process.execPath, [bundleScript], { stdio: 'inherit', cwd: root })

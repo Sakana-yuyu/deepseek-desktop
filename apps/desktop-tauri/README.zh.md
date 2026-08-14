@@ -14,7 +14,9 @@
 | **构建环境** | — | Node（npmmirror）、pnpm（通过 npm 与 npmmirror registry 安装） |
 | **依赖** | — | 在平台应用数据目录执行 `pnpm install --prod --no-frozen-lockfile`（裁剪包与 lockfile 不完全相同；移除 `CI`，避免 pnpm 强制冻结安装） |
 | **Host** | — | `node apps/cli/lib/bin.js web --host 127.0.0.1` |
-| **UI** | — | WebView2 → `http://127.0.0.1:17890`（现有 React Web 客户端） |
+| **UI** | 本地 `shell.html` 标题栏 | 无边框窗口嵌入 `dsh web`；Windows 控件在右，macOS 在左，Linux 读取窗口管理器按钮布局 |
+| **托盘** | 原生托盘图标 | 关闭窗口隐藏到托盘；菜单可显示窗口、检查更新或退出 |
+| **通知** | Overlay 插件 + 本机 POST | `turn/end` 且 `completed` 时，窗口不在前台则弹出系统通知并播放 `sounds/complete.wav` |
 | **更新** | 内置更新公钥 | 检查稳定的 GitHub 更新 manifest，验证下载产物签名，安装并重启 |
 
 安装包内的源码树包括：带已构建 `lib/` 的 `apps/cli`、带 `dist/` 的 `apps/web`、除 examples 与 test-support 外的 `packages/*/*`、`native/landlock-run`、`vendor/*`、`patches/` 和 lockfile。构建安装包时会移除 workspace 的 `devDependencies`，使 `--prod` 安装无需解析演示包。
@@ -40,7 +42,7 @@
 - `dsh-home/` — session 数据（`DSH_HOME`）
 - `cache/` — 下载的 Node zip 或 tarball
 
-预配器会为 Windows x64/x86、macOS x64/arm64 和 Linux x64/arm64 选择 Node。zip 与 tar.gz 解压会拒绝预期 Node 根目录以外的条目。Unix 压缩包保留可执行权限，pnpm 由下载的 Node 二进制执行，因此首次启动不依赖系统 Node。按源码包隔离的 Harness 目录允许更新版本预配新源码，而不删除旧 Host 正在使用的文件；Node 和 pnpm 版本未变时会复用已有运行时。原生外壳只允许一个应用实例，重复启动时聚焦已有窗口。Release 构建会在预配前检查更新；更新网络或 manifest 失败只写入日志，不会阻止启动。
+预配器会为 Windows x64/x86、macOS x64/arm64 和 Linux x64/arm64 选择 Node。zip 与 tar.gz 解压会拒绝预期 Node 根目录以外的条目。Unix 压缩包保留可执行权限，pnpm 由下载的 Node 二进制执行，因此首次启动不依赖系统 Node。按源码包隔离的 Harness 目录允许更新版本预配新源码，而不删除旧 Host 正在使用的文件；Node 和 pnpm 版本未变时会复用已有运行时。原生外壳只允许一个应用实例，重复启动时聚焦已有窗口。Release 构建会在预配前检查更新；更新网络或 manifest 失败只写入日志，不会阻止启动。窗口标题栏、托盘、更新、系统通知和完成音都留在这个 Rust crate。与 Host 的协作是复制到 `$DSH_HOME/desktop-overlay` 的 overlay 插件，通过 `dsh web --patch` 加载，不修改 `packages/`。
 
 ## 构建
 
@@ -93,3 +95,4 @@ pnpm run dev
 | `scripts/bundle-harness-source.mjs` | 裁剪并复制 monorepo 子集到 `bundled/harness/` |
 | `scripts/prepare-dist.mjs` | 生成启动页 dist 与源码包（Tauri `beforeBuildCommand`） |
 | `scripts/serve-dist.mjs` | 为 `tauri dev` 启动静态启动页服务器 |
+| `overlay/desktop-notify/` | Cordis overlay：把已完成的 turn 发到原生通知端口 |
