@@ -12,7 +12,7 @@ The default gate ([.github/workflows/ci.yml](../../../../.github/workflows/ci.ym
 
 ## Decision
 
-A dedicated workflow, [.github/workflows/e2e.yml](../../../../.github/workflows/e2e.yml), separate from ci.yml, runs only `pnpm run test:e2e` against the external API using a repo secret, on trusted events, with a preflight that converts a missing secret into a loud failure instead of a false green. The keyless workflow remains separate so forkable quality gates and secret-consuming real-API gates keep different trigger and credential policies.
+A dedicated workflow, [.github/workflows/e2e.yml](../../../../.github/workflows/e2e.yml), separate from ci.yml, runs only `pnpm run test:e2e` against the external API using a repo secret, on trusted events in `deepseek-ai/deepseek-harness`, with a preflight that converts a missing secret into a loud failure instead of a false green. Community forks skip the job so they do not store a billable DeepSeek key. The keyless workflow remains separate so forkable quality gates and secret-consuming real-API gates keep different trigger and credential policies.
 
 ### A separate workflow, not a job in ci.yml
 
@@ -31,9 +31,12 @@ Internal inference cost is not the limiting constraint, so the workflow optimize
 GitHub withholds repo secrets from two kinds of PR: those from **forks**, and **Dependabot** PRs (same-repo branch, so `head.repo.fork == false`, but secrets are still withheld). A job-level `if:` skips the whole job for both:
 
 ```
-github.event_name != 'pull_request'
-  || !(github.event.pull_request.head.repo.fork || github.event.pull_request.user.login == 'dependabot[bot]')
+github.repository == 'deepseek-ai/deepseek-harness'
+  && (github.event_name != 'pull_request'
+      || !(github.event.pull_request.head.repo.fork || github.event.pull_request.user.login == 'dependabot[bot]'))
 ```
+
+The repository clause keeps the billable key on the official repo. A community fork that inherits the workflow skips the job (a successful check) instead of failing preflight or asking its maintainer to store `DEEPSEEK_API_KEY_EXTERNAL`.
 
 The Dependabot clause keys on the PR **author** (`pull_request.user.login`), not `github.actor` (the run trigger): a maintainer who reopens or re-runs a Dependabot PR would make `github.actor` a human while the PR is still keyless, and an author-based test stays correct across that. A job skipped by a **job-level** `if:` reports as a *successful* check (unlike a workflow/trigger-level skip, which stays pending), so this workflow is safe to mark as a required status check if desired — a fork/Dependabot PR's skipped-but-green check does not block the merge.
 
@@ -90,6 +93,7 @@ None of these require changing the workflow to go public; they are operational s
 
 - **A secret-consuming job inside ci.yml** — rejected: it would couple the keyless, forkable, always-green gate to credential availability and a different trigger/concurrency policy; different lifecycles, different files.
 - **Omitting the `pull_request` trigger** (the smaller key-exposure surface) — rejected for the pre-merge signal; the Security section carries the accepted exposure analysis.
+- **Require every fork to store `DEEPSEEK_API_KEY_EXTERNAL`.** Rejected: a desktop or community fork does not need official real-API coverage, and storing a billable key in Actions is an avoidable exposure. The official-repository clause skips those forks.
 
 ## Consequences
 

@@ -12,7 +12,7 @@ Status: implemented
 
 ## 决策
 
-一个与 ci.yml 分离的专用工作流 [.github/workflows/e2e.yml](../../../../.github/workflows/e2e.yml) 使用 repo secret 对外部 API 运行且仅运行 `pnpm run test:e2e`，仅在可信事件上触发，并带有一个 preflight 检查：将缺失的 secret 转化为明确的失败而非虚假的绿色。无密钥工作流保持独立，使可 fork 的质量门禁与消费 secret 的真实 API 门禁各自拥有不同的触发和凭证策略。
+一个与 ci.yml 分离的专用工作流 [.github/workflows/e2e.yml](../../../../.github/workflows/e2e.yml) 使用 repo secret 对外部 API 运行且仅运行 `pnpm run test:e2e`，仅在 `deepseek-ai/deepseek-harness` 的可信事件上触发，并带有一个 preflight 检查：将缺失的 secret 转化为明确的失败而非虚假的绿色。社区 fork 会跳过该 job，因此不必存放会产生费用的 DeepSeek 密钥。无密钥工作流保持独立，使可 fork 的质量门禁与消费 secret 的真实 API 门禁各自拥有不同的触发和凭证策略。
 
 ### 独立工作流，而非 ci.yml 中的一个 job
 
@@ -31,9 +31,12 @@ ci.yml 的价值在于它无密钥、可 fork、始终为绿：任何贡献者�
 GitHub 对两类 PR 扣留 repo secret：来自 **fork** 的 PR，以及 **Dependabot** PR（同仓库分支，`head.repo.fork == false`，但 secret 仍被扣留）。一个 job 级 `if:` 对两者都跳过整个 job：
 
 ```
-github.event_name != 'pull_request'
-  || !(github.event.pull_request.head.repo.fork || github.event.pull_request.user.login == 'dependabot[bot]')
+github.repository == 'deepseek-ai/deepseek-harness'
+  && (github.event_name != 'pull_request'
+      || !(github.event.pull_request.head.repo.fork || github.event.pull_request.user.login == 'dependabot[bot]'))
 ```
+
+仓库子句把会产生费用的密钥留在官方仓库。继承该工作流的社区 fork 会跳过该 job（检查记为成功），而不是在 preflight 失败，或要求维护者存放 `DEEPSEEK_API_KEY_EXTERNAL`。
 
 Dependabot 子句基于 PR **作者**（`pull_request.user.login`）而非 `github.actor`（运行触发者）：维护者重新打开或重跑 Dependabot PR 时，`github.actor` 会变成人类，但该 PR 仍然无密钥；基于作者的判断在这种情况下依然正确。被 **job 级** `if:` 跳过的 job 报告为*成功*检查（不同于工作流/触发级跳过会保持 pending），因此如果需要将此工作流标记为 required status check 也是安全的——fork/Dependabot PR 的跳过但绿色的检查不会阻塞合并。
 
@@ -90,6 +93,7 @@ DeepSeek 原生 `web_search` 探测已注册但会跳过。线上 Anthropic 兼�
 
 - **在 ci.yml 中添加消费 secret 的 job**：否决。会将无密钥、可 fork、始终为绿的门禁耦合到凭证可用性和不同的触发/并发策略上；不同的生命周期，不同的文件。
 - **省略 `pull_request` 触发器**（更小的密钥暴露面）：为获得合并前信号而否决；安全性章节承载了已接受的暴露分析。
+- **要求每个 fork 都存放 `DEEPSEEK_API_KEY_EXTERNAL`。** 不采用：桌面或社区 fork 不需要官方真实 API 覆盖，把会产生费用的密钥放进 Actions 是可以避免的暴露。官方仓库子句会跳过这些 fork。
 
 ## 后果
 
