@@ -210,7 +210,5 @@ jobs:
           if gh release view desktop-updater >/dev/null 2>&1; then
             gh release upload desktop-updater release-assets/latest.json --clobber
           else
-            gh release create desktop-updater release-assets/latest.json --target "$(git rev-parse HEAD)" --title "DeepSeek Harness Desktop update channel" --notes "Stable signed-update manifest channel. Installers are published in versioned desktop releases.
-
-稳定的签名更新 manifest 通道。安装包发布在带版本号的 desktop Release 中。" --prerelease
+            gh release create desktop-updater release-assets/latest.json --target "$(git rev-parse HEAD)" --title "DeepSeek Harness Desktop update channel" --notes "Stable signed-update manifest channel. Installers are published in versioned desktop releases. / 稳定的签名更新 manifest 通道。安装包发布在带版本号的 desktop Release 中。" --prerelease
           fi
