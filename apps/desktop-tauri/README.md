@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 Rust/WebView2 shell over the existing `dsh web` UI. The installer ships **harness source** (no `node_modules`); first run scans the host for a compatible Node / pnpm and an existing `~/.dsh` home, downloads **build tools only** when the scan finds none, then runs `pnpm install --prod` against the bundled tree.
 
-Current desktop prerelease: **0.1.0-rc.5-0.2**.
+Current desktop release: **0.1.0-rc.5-0.3**.
 
 ## Architecture
 
@@ -58,13 +58,13 @@ $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD=(Get-Content "$HOME\.tauri\deepseek-desk
 pnpm run build:win
 ```
 
-Installer output: `src-tauri/target/release/bundle/nsis/DeepSeek Harness_0.1.0-rc.5-0.2_x64-setup.exe`
+Installer output: `src-tauri/target/release/bundle/nsis/DeepSeek Harness_0.1.0-rc.5-0.3_x64-setup.exe`
 
 The NSIS installer bundles **English**, **Simplified Chinese**, and **Traditional Chinese**. Language follows the OS locale automatically (no language picker); if the locale is unsupported, English is used. Before copying files, the installer silently closes `dsh-desktop.exe` and its child process tree. After installation, it recreates an existing desktop shortcut with the versioned standalone ICO resource and notifies Explorer to invalidate stale icon cache entries.
 
 ## Release
 
-Pushing a `desktop-v*` tag runs [the desktop release workflow](../../.github/workflows/desktop-release.yml). It builds Windows x64/x86 NSIS installers, macOS Intel/Apple Silicon DMGs, and Linux x64 AppImage/deb packages, then publishes one prerelease after every matrix job succeeds. The workflow signs each updater artifact, generates the Tauri `latest.json`, and replaces the manifest in the stable `desktop-updater` release channel. A manual dispatch rebuilds an existing tag.
+Pushing a `desktop-v*` tag runs [the desktop release workflow](../../.github/workflows/desktop-release.yml). It builds Windows x64/x86 NSIS installers, macOS Intel/Apple Silicon DMGs, and Linux x64 AppImage/deb packages, then publishes one GitHub Release after every matrix job succeeds. The workflow signs each updater artifact, generates the Tauri `latest.json`, and replaces the manifest in the stable `desktop-updater` release channel. A manual dispatch rebuilds an existing tag.
 
 Release asset names include the operating system and architecture. Updater signatures authenticate artifacts to installed applications, but the executables are not operating-system code-signed or notarized, so Windows SmartScreen, macOS Gatekeeper, or Linux desktop security prompts may require explicit approval.
 

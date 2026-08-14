@@ -9,7 +9,7 @@ on:
       tag:
         description: Existing desktop-v* tag to rebuild and publish
         required: true
-        default: desktop-v0.1.0-rc.5-0.2
+        default: desktop-v0.1.0-rc.5-0.3
 
 permissions:
   contents: write
@@ -195,7 +195,7 @@ jobs:
             --notes "DeepSeek Harness Desktop $version" `
             --pub-date $publishedAt
 
-      - name: Publish prerelease
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -212,14 +212,14 @@ jobs:
           - macOS Intel and Apple Silicon DMGs
           - Linux x64 AppImage and deb packages
 
-          These prerelease artifacts are not code-signed or notarized. Windows SmartScreen, macOS Gatekeeper, or Linux desktop security prompts may require explicit approval.
+          These artifacts are not operating-system code-signed or notarized. Windows SmartScreen, macOS Gatekeeper, or Linux desktop security prompts may require explicit approval.
           EOF
 
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" release-assets/* --clobber
-            gh release edit "$RELEASE_TAG" --title "DeepSeek Harness Desktop ${RELEASE_TAG#desktop-v}" --notes-file release-notes.md --prerelease
+            gh release edit "$RELEASE_TAG" --title "DeepSeek Harness Desktop ${RELEASE_TAG#desktop-v}" --notes-file release-notes.md --latest
           else
-            gh release create "$RELEASE_TAG" release-assets/* --verify-tag --title "DeepSeek Harness Desktop ${RELEASE_TAG#desktop-v}" --notes-file release-notes.md --prerelease
+            gh release create "$RELEASE_TAG" release-assets/* --verify-tag --title "DeepSeek Harness Desktop ${RELEASE_TAG#desktop-v}" --notes-file release-notes.md --latest
           fi
 
           if gh release view desktop-updater >/dev/null 2>&1; then

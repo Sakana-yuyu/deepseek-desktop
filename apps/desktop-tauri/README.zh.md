@@ -4,7 +4,7 @@
 
 这是现有 `dsh web` 界面的 Rust/WebView2 外壳。安装包携带 **Harness 源码**，不包含 `node_modules`；首次运行先扫描本机兼容的 Node / pnpm 和已有的 `~/.dsh` 主目录，只在扫描失败时从镜像拉取构建工具，再对安装包内的源码树执行 `pnpm install --prod`。
 
-当前桌面预发布版本：**0.1.0-rc.5-0.2**。
+当前桌面发行版本：**0.1.0-rc.5-0.3**。
 
 ## 架构
 
@@ -58,13 +58,13 @@ $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD=(Get-Content "$HOME\.tauri\deepseek-desk
 pnpm run build:win
 ```
 
-安装包输出：`src-tauri/target/release/bundle/nsis/DeepSeek Harness_0.1.0-rc.5-0.2_x64-setup.exe`
+安装包输出：`src-tauri/target/release/bundle/nsis/DeepSeek Harness_0.1.0-rc.5-0.3_x64-setup.exe`
 
 NSIS 安装包包含**英语**、**简体中文**和**繁体中文**。安装语言自动跟随操作系统 locale，不显示语言选择器；不支持的 locale 使用英语。复制文件前，安装器会静默关闭 `dsh-desktop.exe` 及其子进程树。安装后，安装器使用独立的版本化 ICO 资源重建已有桌面快捷方式，并通知 Explorer 清除陈旧的图标缓存记录。
 
 ## 发布
 
-推送 `desktop-v*` tag 会运行[桌面发布工作流](../../.github/workflows/desktop-release.yml)。该工作流构建 Windows x64/x86 NSIS 安装包、macOS Intel/Apple Silicon DMG 和 Linux x64 AppImage/deb，并在所有矩阵任务成功后发布一个预发布版本。工作流为每个更新产物生成签名，生成 Tauri `latest.json`，再替换稳定 `desktop-updater` Release 通道中的 manifest。手动触发可重新构建现有 tag。
+推送 `desktop-v*` tag 会运行[桌面发布工作流](../../.github/workflows/desktop-release.yml)。该工作流构建 Windows x64/x86 NSIS 安装包、macOS Intel/Apple Silicon DMG 和 Linux x64 AppImage/deb，并在所有矩阵任务成功后发布一个 GitHub Release。工作流为每个更新产物生成签名，生成 Tauri `latest.json`，再替换稳定 `desktop-updater` Release 通道中的 manifest。手动触发可重新构建现有 tag。
 
 Release 资产名称包含操作系统和架构。更新签名用于向已安装应用验证产物，但可执行文件没有操作系统代码签名，也未经过 notarization，因此 Windows SmartScreen、macOS Gatekeeper 或 Linux 桌面安全提示可能要求用户明确批准。
 
