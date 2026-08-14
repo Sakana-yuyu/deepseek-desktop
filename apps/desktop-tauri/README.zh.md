@@ -15,6 +15,7 @@
 | **依赖** | — | 在平台应用数据目录执行 `pnpm install --prod --no-frozen-lockfile`（裁剪包与 lockfile 不完全相同；移除 `CI`，避免 pnpm 强制冻结安装） |
 | **Host** | — | `node apps/cli/lib/bin.js web --host 127.0.0.1` |
 | **UI** | — | WebView2 → `http://127.0.0.1:17890`（现有 React Web 客户端） |
+| **更新** | 内置更新公钥 | 检查稳定的 GitHub 更新 manifest，验证下载产物签名，安装并重启 |
 
 安装包内的源码树包括：带已构建 `lib/` 的 `apps/cli`、带 `dist/` 的 `apps/web`、除 examples 与 test-support 外的 `packages/*/*`、`native/landlock-run`、`vendor/*`、`patches/` 和 lockfile。构建安装包时会移除 workspace 的 `devDependencies`，使 `--prod` 安装无需解析演示包。
 
@@ -39,7 +40,7 @@
 - `dsh-home/` — session 数据（`DSH_HOME`）
 - `cache/` — 下载的 Node zip 或 tarball
 
-预配器会为 Windows x64/x86、macOS x64/arm64 和 Linux x64/arm64 选择 Node。zip 与 tar.gz 解压会拒绝预期 Node 根目录以外的条目。Unix 压缩包保留可执行权限，pnpm 由下载的 Node 二进制执行，因此首次启动不依赖系统 Node。按源码包隔离的 Harness 目录允许更新版本预配新源码，而不删除旧 Host 正在使用的文件；Node 和 pnpm 版本未变时会复用已有运行时。原生外壳只允许一个应用实例，重复启动时聚焦已有窗口。
+预配器会为 Windows x64/x86、macOS x64/arm64 和 Linux x64/arm64 选择 Node。zip 与 tar.gz 解压会拒绝预期 Node 根目录以外的条目。Unix 压缩包保留可执行权限，pnpm 由下载的 Node 二进制执行，因此首次启动不依赖系统 Node。按源码包隔离的 Harness 目录允许更新版本预配新源码，而不删除旧 Host 正在使用的文件；Node 和 pnpm 版本未变时会复用已有运行时。原生外壳只允许一个应用实例，重复启动时聚焦已有窗口。Release 构建会在预配前检查更新；更新网络或 manifest 失败只写入日志，不会阻止启动。
 
 ## 构建
 
@@ -49,20 +50,22 @@
 pnpm run build
 cd apps/desktop-tauri
 pnpm install
+$env:TAURI_SIGNING_PRIVATE_KEY=(Get-Content "$HOME\.tauri\deepseek-desktop-updater.key" -Raw)
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD=(Get-Content "$HOME\.tauri\deepseek-desktop-updater.key.password" -Raw)
 pnpm run build:win
 ```
 
 安装包输出：`src-tauri/target/release/bundle/nsis/DeepSeek Harness_0.1.0-rc.5_x64-setup.exe`
 
-NSIS 安装包包含**英语**、**简体中文**和**繁体中文**。安装语言自动跟随操作系统 locale，不显示语言选择器；不支持的 locale 使用英语。
+NSIS 安装包包含**英语**、**简体中文**和**繁体中文**。安装语言自动跟随操作系统 locale，不显示语言选择器；不支持的 locale 使用英语。复制文件前，安装器会静默关闭 `dsh-desktop.exe` 及其子进程树。安装后，安装器使用独立的版本化 ICO 资源重建已有桌面快捷方式，并通知 Explorer 清除陈旧的图标缓存记录。
 
 ## 发布
 
-推送 `desktop-v*` tag 会运行[桌面发布工作流](../../.github/workflows/desktop-release.yml)。该工作流构建 Windows x64/x86 NSIS 安装包、macOS Intel/Apple Silicon DMG 和 Linux x64 AppImage/deb，并在所有矩阵任务成功后发布一个预发布版本。手动触发可重新构建现有 tag。
+推送 `desktop-v*` tag 会运行[桌面发布工作流](../../.github/workflows/desktop-release.yml)。该工作流构建 Windows x64/x86 NSIS 安装包、macOS Intel/Apple Silicon DMG 和 Linux x64 AppImage/deb，并在所有矩阵任务成功后发布一个预发布版本。工作流为每个更新产物生成签名，生成 Tauri `latest.json`，再替换稳定 `desktop-updater` Release 通道中的 manifest。手动触发可重新构建现有 tag。
 
-Release 资产名称包含操作系统和架构。云端产物目前未签名，也未经过 notarization，因此 Windows SmartScreen、macOS Gatekeeper 或 Linux 桌面安全提示可能要求用户明确批准。
+Release 资产名称包含操作系统和架构。更新签名用于向已安装应用验证产物，但可执行文件没有操作系统代码签名，也未经过 notarization，因此 Windows SmartScreen、macOS Gatekeeper 或 Linux 桌面安全提示可能要求用户明确批准。
 
-Windows、macOS 和 Linux 图标均从 `app-icon.svg` 生成；其中使用与 `packages/client/ui-primitives/src/FishLogo.tsx` 相同的透明背景黑色鱼形路径。Tauri bundle、NSIS 安装器与卸载器、启动窗口、主窗口标题栏、任务栏、Dock 和 Linux desktop entry 均使用这套图标。
+Windows、macOS 和 Linux 图标均从 `app-icon.svg` 生成；其中使用与 `packages/client/ui-primitives/src/FishLogo.tsx` 相同的透明背景黑色鱼形路径。Tauri bundle、NSIS 安装器与卸载器、启动窗口、主窗口标题栏、任务栏、Dock 和 Linux desktop entry 均使用这套图标。Windows 安装还携带文件名含版本的 ICO 文件，避免快捷方式图标查询复用旧的可执行文件路径缓存键。
 
 只生成源码包（不运行 Tauri）：
 

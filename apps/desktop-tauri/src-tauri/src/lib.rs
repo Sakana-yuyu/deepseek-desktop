@@ -1,4 +1,5 @@
 mod runtime;
+mod updater;
 
 use runtime::boot_log;
 use runtime::config::BUNDLED_HARNESS_DIR;
@@ -10,6 +11,7 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             let window = app
                 .get_webview_window("main")
@@ -61,21 +63,27 @@ async fn boot_app(app: AppHandle, bundled: Option<PathBuf>) -> Result<(), String
     ));
 
     let app_for_progress = app.clone();
-    let progress = Arc::new(move |event: ProvisionEvent| {
-        let app = app_for_progress.clone();
-        tauri::async_runtime::spawn(async move {
-            let script = match event {
-                ProvisionEvent::Status(text) => {
-                    boot_log::info(&format!("status: {text}"));
-                    format!("window.__DSH_SPLASH__?.setStatus({});", json_string(&text))
-                }
-                ProvisionEvent::Progress(pct) => {
-                    format!("window.__DSH_SPLASH__?.setProgress({pct});", pct = pct)
-                }
-            };
-            let _ = splash_eval(&app, &script);
+    let progress: Arc<dyn Fn(ProvisionEvent) + Send + Sync> =
+        Arc::new(move |event: ProvisionEvent| {
+            let app = app_for_progress.clone();
+            tauri::async_runtime::spawn(async move {
+                let script = match event {
+                    ProvisionEvent::Status(text) => {
+                        boot_log::info(&format!("status: {text}"));
+                        format!("window.__DSH_SPLASH__?.setStatus({});", json_string(&text))
+                    }
+                    ProvisionEvent::Progress(pct) => {
+                        format!("window.__DSH_SPLASH__?.setProgress({pct});", pct = pct)
+                    }
+                };
+                let _ = splash_eval(&app, &script);
+            });
         });
-    });
+
+    if let Err(error) = updater::install_available(&app, Arc::clone(&progress)).await {
+        boot_log::error(&format!("desktop update skipped: {error}"));
+        progress(ProvisionEvent::Status("更新检查失败，正在继续启动…".into()));
+    }
 
     let runtime = DesktopRuntime::boot(bundled, progress).await?;
     let web_url = runtime.web_url.clone();

@@ -10,6 +10,7 @@
     "prepare:dist": "node scripts/prepare-dist.mjs",
     "dev": "tauri dev",
     "dev:local": "cross-env DSH_DESKTOP_LAUNCH=local tauri dev",
+    "test:update-manifest": "node --test scripts/generate-updater-manifest.test.mjs",
     "build": "tauri build",
     "build:win": "tauri build --bundles nsis"
   },

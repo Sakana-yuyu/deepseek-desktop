@@ -1,74 +1,56 @@
-# DeepSeek Harness
+# DeepSeek Harness Desktop
 
 [English](README.md) | 中文
 
-DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的开源 agent harness（智能体框架）。
+本仓库是 [Sakana-yuyu](https://github.com/Sakana-yuyu) 维护的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 跨平台桌面发行版。DeepSeek Harness 是由 [DeepSeek AI](https://deepseek.com) 开发的开源 agent harness（智能体框架）。
 
-它采用**一切皆插件**的架构，并由 [Cordis](https://github.com/cordiverse/cordis) 驱动，其设计参见论文 [_A Programming Paradigm for Spatiotemporal Composability_](https://github.com/cordiverse/paper)。
+桌面应用保留现有 `dsh web` 使用体验，并通过轻量的 Tauri/WebView 原生外壳运行。应用从可配置镜像下载私有 Node 和 pnpm 运行时，用户无需预先搭建 Harness 开发环境。
 
-## 开发者预览
+## 下载
 
-DeepSeek Harness 目前处于 _开发者预览_ 阶段，正在快速迭代。**未来将出现破坏兼容性的变更。**
+从 [GitHub Releases](https://github.com/Sakana-yuyu/deepseek-desktop/releases/tag/desktop-v0.1.0-rc.5) 下载当前 **0.1.0-rc.5** 预发布版本。
+
+- Windows x64 和 x86：NSIS 安装包
+- macOS Intel 和 Apple Silicon：DMG
+- Linux x64：AppImage 和 deb
+
+首次启动会下载 Node 和生产依赖，后续启动复用已安装的运行时。桌面更新在安装前验证签名；Windows 升级会先关闭已有应用进程，再替换文件。
+
+## 桌面端设计
+
+- 使用 Rust/Tauri 原生外壳，而不是 Electron
+- 保留 DeepSeek Harness Web UI 和插件架构
+- 使用紧凑安装包，并通过镜像拉取运行时依赖
+- 按 Harness 源码包隔离目录，避免升级时发生文件占用冲突
+- 支持单实例启动、隐藏子进程窗口、签名更新 manifest 和多语言 Windows 安装
+- 可执行文件、窗口、任务栏、快捷方式和安装器统一使用透明背景的 DeepSeek 鱼形图标
+
+实现与构建细节见[桌面端 README](apps/desktop-tauri/README.md)。
 
 ## 运行
 
-### 通过 `npm` 运行
-
-安装 `Node.js`，然后运行：
+安装 Node.js，然后运行上游 npm 包：
 
 ```sh
 npx @deepseek-ai/dsh web
 ```
 
-该命令会启动 Web UI，默认地址为 `http://127.0.0.1:3080`。详见 [Web UI 指南](docs/user/guide/index.md)。
-
 ### 从源码运行
 
-如需从仓库源码运行：
+从源码构建本 fork：
 
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
-cd deepseek-harness
+git clone https://github.com/Sakana-yuyu/deepseek-desktop.git
+cd deepseek-desktop
 pnpm install
 pnpm run build
-pnpm dsh web
+pnpm --dir apps/desktop-tauri run build
 ```
-
-## 社区与支持
-
-- 欢迎通过 [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions) 提交反馈或 bug 报告。
-- 为你的插件仓库添加 [`dsh-plugin`](https://github.com/topics/dsh-plugin) 话题，便于被发现。
-- 欢迎加入 DeepSeek Harness 企微群：扫码添加企微小助手并填写入群问卷，完成后小助手会邀请你入群。
-
-<table>
-  <thead>
-    <tr>
-      <th align="center">企微小助手</th>
-      <th align="center">入群问卷</th>
-      <th align="center">微信公众号</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td align="center"><img src="assets/community-wecom-assistant.png" alt="DeepSeek Harness 企微小助手二维码" width="180" height="180"></td>
-      <td align="center"><a href="https://trtgsjkv6r.feishu.cn/share/base/form/shrcnIt5twSVdLGD52KJBckGCgg"><img src="assets/community-wecom-survey.png" alt="DeepSeek Harness 入群问卷二维码" width="180" height="180"></a></td>
-      <td align="center"><img src="assets/community-wechat-official-account.png" alt="DeepSeek Harness 团队微信公众号二维码" width="180" height="180"></td>
-    </tr>
-  </tbody>
-</table>
 
 ## 参与贡献
 
-参见 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
-## 开发
-
-请先阅读[开发指南](docs/development.md)与[架构文档](docs/architecture.md)。
-
-面向 agent：请遵循 [AGENTS.md](AGENTS.md)。
+桌面端问题与贡献请提交到本 fork。Harness 框架贡献请遵循上游的[贡献指南](CONTRIBUTING.md)、[开发指南](docs/development.md)和[架构文档](docs/architecture.md)。
 
 ## 许可证
 
-[MIT](LICENSE)
-
-第三方依赖及其许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+DeepSeek Harness 和此桌面发行版均使用 [MIT 许可证](LICENSE)。第三方依赖及其许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

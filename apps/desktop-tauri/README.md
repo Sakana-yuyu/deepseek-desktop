@@ -15,6 +15,7 @@ Current desktop prerelease: **0.1.0-rc.5**.
 | **Dependencies** | — | `pnpm install --prod --no-frozen-lockfile` in the platform application-data directory (trimmed bundle vs lockfile; `CI` unset so pnpm does not force frozen install) |
 | **Host** | — | `node apps/cli/lib/bin.js web --host 127.0.0.1` |
 | **UI** | — | WebView2 → `http://127.0.0.1:17890` (existing React web client) |
+| **Updates** | Embedded updater public key | Check the stable GitHub update manifest, verify the downloaded artifact signature, install, and restart |
 
 Bundled tree includes: `apps/cli` (with built `lib/`), `apps/web` (with `dist/`), `packages/*/*` (excluding examples and test-support), `native/landlock-run`, `vendor/*`, `patches/`, lockfile — **not** the old 900k-junction offline runtime. Workspace `devDependencies` are stripped at bundle time so `--prod` install does not require demo packages.
 
@@ -39,7 +40,7 @@ Writable paths live under the platform application-data directory (`%APPDATA%\De
 - `dsh-home/` — session data (`DSH_HOME`)
 - `cache/` — downloaded Node zip or tarball
 
-The provisioner selects Node for Windows x64/x86, macOS x64/arm64, and Linux x64/arm64. Zip and tar.gz extraction reject entries outside the expected Node archive root. Unix archives retain executable permissions, and pnpm runs through the downloaded Node binary so first launch does not depend on a system Node installation. Bundle-specific harness directories let an update provision new source without deleting files used by an older running Host; the downloaded Node and pnpm runtimes are reused when their versions remain current. The native shell permits one application instance and focuses the existing window on repeated launches.
+The provisioner selects Node for Windows x64/x86, macOS x64/arm64, and Linux x64/arm64. Zip and tar.gz extraction reject entries outside the expected Node archive root. Unix archives retain executable permissions, and pnpm runs through the downloaded Node binary so first launch does not depend on a system Node installation. Bundle-specific harness directories let an update provision new source without deleting files used by an older running Host; the downloaded Node and pnpm runtimes are reused when their versions remain current. The native shell permits one application instance and focuses the existing window on repeated launches. Release builds check for an update before provisioning; update-network or manifest failures are logged and do not block startup.
 
 ## Build
 
@@ -49,20 +50,22 @@ From the repo root (needs built CLI + web dist):
 pnpm run build
 cd apps/desktop-tauri
 pnpm install
+$env:TAURI_SIGNING_PRIVATE_KEY=(Get-Content "$HOME\.tauri\deepseek-desktop-updater.key" -Raw)
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD=(Get-Content "$HOME\.tauri\deepseek-desktop-updater.key.password" -Raw)
 pnpm run build:win
 ```
 
 Installer output: `src-tauri/target/release/bundle/nsis/DeepSeek Harness_0.1.0-rc.5_x64-setup.exe`
 
-The NSIS installer bundles **English**, **Simplified Chinese**, and **Traditional Chinese**. Language follows the OS locale automatically (no language picker); if the locale is unsupported, English is used.
+The NSIS installer bundles **English**, **Simplified Chinese**, and **Traditional Chinese**. Language follows the OS locale automatically (no language picker); if the locale is unsupported, English is used. Before copying files, the installer silently closes `dsh-desktop.exe` and its child process tree. After installation, it recreates an existing desktop shortcut with the versioned standalone ICO resource and notifies Explorer to invalidate stale icon cache entries.
 
 ## Release
 
-Pushing a `desktop-v*` tag runs [the desktop release workflow](../../.github/workflows/desktop-release.yml). It builds Windows x64/x86 NSIS installers, macOS Intel/Apple Silicon DMGs, and Linux x64 AppImage/deb packages, then publishes one prerelease after every matrix job succeeds. A manual dispatch rebuilds an existing tag.
+Pushing a `desktop-v*` tag runs [the desktop release workflow](../../.github/workflows/desktop-release.yml). It builds Windows x64/x86 NSIS installers, macOS Intel/Apple Silicon DMGs, and Linux x64 AppImage/deb packages, then publishes one prerelease after every matrix job succeeds. The workflow signs each updater artifact, generates the Tauri `latest.json`, and replaces the manifest in the stable `desktop-updater` release channel. A manual dispatch rebuilds an existing tag.
 
-Release asset names include the operating system and architecture. The cloud artifacts are currently unsigned and not notarized, so Windows SmartScreen, macOS Gatekeeper, or Linux desktop security prompts may require explicit approval.
+Release asset names include the operating system and architecture. Updater signatures authenticate artifacts to installed applications, but the executables are not operating-system code-signed or notarized, so Windows SmartScreen, macOS Gatekeeper, or Linux desktop security prompts may require explicit approval.
 
-All Windows, macOS, and Linux icons are generated from `app-icon.svg`, which carries the same background-free black fish path as `packages/client/ui-primitives/src/FishLogo.tsx`. The Tauri bundle, NSIS installer/uninstaller, splash window, main title bar, taskbar, Dock, and Linux desktop entry use that icon set.
+All Windows, macOS, and Linux icons are generated from `app-icon.svg`, which carries the same background-free black fish path as `packages/client/ui-primitives/src/FishLogo.tsx`. The Tauri bundle, NSIS installer/uninstaller, splash window, main title bar, taskbar, Dock, and Linux desktop entry use that icon set. Windows installation also includes a version-qualified ICO file so shortcut icon lookup does not reuse an older executable-path cache key.
 
 Bundle only (no Tauri):
 

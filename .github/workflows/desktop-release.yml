@@ -88,6 +88,9 @@ jobs:
         run: pnpm run build
 
       - name: Build desktop bundles
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm --dir apps/desktop-tauri exec tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
       - name: Stage release assets
@@ -104,18 +107,29 @@ jobs:
           if ($env:ASSET_PLATFORM -eq 'windows') {
             $source = Get-ChildItem $bundleRoot -Recurse -File -Filter '*-setup.exe' | Select-Object -First 1
             if (-not $source) { throw "NSIS installer not found under $bundleRoot" }
-            Copy-Item $source.FullName "release-assets/deepseek-harness-$version-windows-$env:ASSET_ARCH-setup.exe"
+            $signature = Get-Item "$($source.FullName).sig" -ErrorAction Stop
+            $destination = "release-assets/deepseek-harness-$version-windows-$env:ASSET_ARCH-setup.exe"
+            Copy-Item $source.FullName $destination
+            Copy-Item $signature.FullName "$destination.sig"
           }
           elseif ($env:ASSET_PLATFORM -eq 'macos') {
             $source = Get-ChildItem $bundleRoot -Recurse -File -Filter '*.dmg' | Select-Object -First 1
-            if (-not $source) { throw "DMG not found under $bundleRoot" }
+            $updater = Get-ChildItem $bundleRoot -Recurse -File -Filter '*.app.tar.gz' | Select-Object -First 1
+            if (-not $source -or -not $updater) { throw "DMG or updater archive not found under $bundleRoot" }
+            $signature = Get-Item "$($updater.FullName).sig" -ErrorAction Stop
             Copy-Item $source.FullName "release-assets/deepseek-harness-$version-macos-$env:ASSET_ARCH.dmg"
+            $updaterDestination = "release-assets/deepseek-harness-$version-macos-$env:ASSET_ARCH.app.tar.gz"
+            Copy-Item $updater.FullName $updaterDestination
+            Copy-Item $signature.FullName "$updaterDestination.sig"
           }
           else {
             $appImage = Get-ChildItem $bundleRoot -Recurse -File -Filter '*.AppImage' | Select-Object -First 1
             $deb = Get-ChildItem $bundleRoot -Recurse -File -Filter '*.deb' | Select-Object -First 1
             if (-not $appImage -or -not $deb) { throw "Linux AppImage or deb not found under $bundleRoot" }
-            Copy-Item $appImage.FullName "release-assets/deepseek-harness-$version-linux-$env:ASSET_ARCH.AppImage"
+            $signature = Get-Item "$($appImage.FullName).sig" -ErrorAction Stop
+            $appImageDestination = "release-assets/deepseek-harness-$version-linux-$env:ASSET_ARCH.AppImage"
+            Copy-Item $appImage.FullName $appImageDestination
+            Copy-Item $signature.FullName "$appImageDestination.sig"
             Copy-Item $deb.FullName "release-assets/deepseek-harness-$version-linux-$env:ASSET_ARCH.deb"
           }
 
@@ -131,6 +145,12 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 1
+          persist-credentials: false
+
       - uses: actions/download-artifact@v4
         with:
           pattern: desktop-*
@@ -142,10 +162,17 @@ jobs:
         run: |
           $expected = @(
             '*-windows-x64-setup.exe',
+            '*-windows-x64-setup.exe.sig',
             '*-windows-x86-setup.exe',
+            '*-windows-x86-setup.exe.sig',
             '*-macos-x64.dmg',
+            '*-macos-x64.app.tar.gz',
+            '*-macos-x64.app.tar.gz.sig',
             '*-macos-arm64.dmg',
+            '*-macos-arm64.app.tar.gz',
+            '*-macos-arm64.app.tar.gz.sig',
             '*-linux-x64.AppImage',
+            '*-linux-x64.AppImage.sig',
             '*-linux-x64.deb'
           )
           foreach ($pattern in $expected) {
@@ -153,6 +180,20 @@ jobs:
               throw "Missing release asset matching $pattern"
             }
           }
+
+      - name: Generate updater manifest
+        shell: pwsh
+        run: |
+          $version = (Get-Content apps/desktop-tauri/package.json | ConvertFrom-Json).version
+          $publishedAt = (Get-Date).ToUniversalTime().ToString('o')
+          node apps/desktop-tauri/scripts/generate-updater-manifest.mjs `
+            --assets-dir release-assets `
+            --output release-assets/latest.json `
+            --version $version `
+            --repository $env:GITHUB_REPOSITORY `
+            --release-tag $env:RELEASE_TAG `
+            --notes "DeepSeek Harness Desktop $version" `
+            --pub-date $publishedAt
 
       - name: Publish prerelease
         env:
@@ -163,6 +204,8 @@ jobs:
           DeepSeek Harness Desktop is a Tauri/WebView shell for the existing `dsh web` interface.
 
           The installer contains a trimmed Harness source tree without `node_modules`. On first launch, the app downloads the matching Node runtime and pnpm from the configured mirrors, installs production dependencies, starts the local Harness web host, and opens it in the desktop WebView.
+
+          This build adds signature-verified automatic updates. Windows installation closes a running desktop process before replacing files and refreshes an existing desktop shortcut with the versioned DeepSeek fish icon.
 
           Included builds:
           - Windows x64 and x86 NSIS installers
@@ -177,4 +220,10 @@ jobs:
             gh release edit "$RELEASE_TAG" --title "DeepSeek Harness Desktop ${RELEASE_TAG#desktop-v}" --notes-file release-notes.md --prerelease
           else
             gh release create "$RELEASE_TAG" release-assets/* --verify-tag --title "DeepSeek Harness Desktop ${RELEASE_TAG#desktop-v}" --notes-file release-notes.md --prerelease
+          fi
+
+          if gh release view desktop-updater >/dev/null 2>&1; then
+            gh release upload desktop-updater release-assets/latest.json --clobber
+          else
+            gh release create desktop-updater release-assets/latest.json --target "$(git rev-parse HEAD)" --title "DeepSeek Harness Desktop update channel" --notes "Stable signed-update manifest channel. Installers are published in versioned desktop releases." --prerelease
           fi

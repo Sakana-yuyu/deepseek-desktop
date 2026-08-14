@@ -26,8 +26,20 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIyOTU4Q0I3RkU0OTUzOEMKUldTTVUwbit0NHlWSWxwMDJ2TzQreUZ4cVFqejg1R0JpYU9tdWxPQlR5L1ViSjRKaVlML2x0UXcK",
+      "endpoints": [
+        "https://github.com/Sakana-yuyu/deepseek-desktop/releases/download/desktop-updater/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["nsis", "dmg", "appimage", "deb"],
     "category": "DeveloperTool",
     "shortDescription": "DeepSeek Harness desktop shell",
@@ -40,13 +52,15 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../bundled/harness": "harness-source"
+      "../bundled/harness": "harness-source",
+      "icons/icon.ico": "deepseek-harness-icon-0.1.0-rc.5.ico"
     },
     "windows": {
       "nsis": {
         "installMode": "currentUser",
         "languages": ["English", "SimpChinese", "TradChinese"],
         "displayLanguageSelector": false,
+        "installerHooks": "./windows/installer-hooks.nsh",
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico"
       }
