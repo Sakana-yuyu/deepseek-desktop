@@ -41,7 +41,7 @@ English | [中文](README.zh.md)
 | 图标 | 能力 | 说明 |
 | :---: | --- | --- |
 | <img src="apps/desktop-tauri/app-icon.png" width="22" height="22" alt="DeepSeek" /> | 原生桌面壳 | Tauri 2 / Rust 窗口承载现有 `dsh web`，不把业务搬进 Electron。 |
-| <img src="https://cdn.simpleicons.org/windows/0078D4" width="22" alt="Title bar" /> | 自定义标题栏 | 取消系统原生按钮。Windows 在右，macOS 在左，Linux 读窗口管理器布局。 |
+| <img src="https://cdn.simpleicons.org/tauri/24C8DB" width="22" alt="Title bar" /> | 自定义标题栏 | 取消系统原生按钮。Windows 在右，macOS 在左，Linux 读窗口管理器布局。 |
 | <img src="https://cdn.simpleicons.org/apple/000000" width="22" alt="Tray" /> | 系统托盘 | 关闭窗口隐藏到托盘。菜单可显示窗口、检查更新或退出。 |
 | <img src="https://cdn.simpleicons.org/github/111827" width="22" alt="Update" /> | 签名自动更新 | 启动前检查 `desktop-updater` 通道，校验签名后再安装。 |
 | <img src="https://cdn.simpleicons.org/googlechat/34A853" width="22" alt="Notify" /> | 任务完成提醒 | 一轮 `turn/end` 完成且窗口不在前台时，弹出系统通知并播放完成音。 |

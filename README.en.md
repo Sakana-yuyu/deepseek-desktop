@@ -40,7 +40,7 @@ Upstream owns the agent loop, tools, and Web UI. This fork only adds desktop chr
 | Icon | Capability | Notes |
 | :---: | --- | --- |
 | <img src="apps/desktop-tauri/app-icon.png" width="22" height="22" alt="DeepSeek" /> | Native shell | Tauri 2 / Rust hosts the existing `dsh web` UI. |
-| <img src="https://cdn.simpleicons.org/windows/0078D4" width="22" alt="Title bar" /> | Custom title bar | No native caption buttons. Right on Windows, left on macOS, WM layout on Linux. |
+| <img src="https://cdn.simpleicons.org/tauri/24C8DB" width="22" alt="Title bar" /> | Custom title bar | No native caption buttons. Right on Windows, left on macOS, WM layout on Linux. |
 | <img src="https://cdn.simpleicons.org/apple/000000" width="22" alt="Tray" /> | System tray | Close hides to tray. Menu shows the window, checks updates, or quits. |
 | <img src="https://cdn.simpleicons.org/github/111827" width="22" alt="Update" /> | Signed auto-update | Startup checks the `desktop-updater` channel and verifies signatures. |
 | <img src="https://cdn.simpleicons.org/googlechat/34A853" width="22" alt="Notify" /> | Task-complete alert | A completed `turn/end` toasts and plays a chime when the window is unfocused. |
