@@ -1,18 +1,19 @@
 //! Put the Host's required CLIs on PATH: process env first, user PATH when missing.
 
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+
+use crate::cli_shim::{DshLaunchSpec, LAUNCH_FILE};
 
 use super::boot_log;
 use super::env_path::{discovery_path, path_eq, which_on_host};
+use super::io_fallback::recoverable_message;
+
+#[cfg(windows)]
+use super::env_path::is_direct_spawnable_cli;
 use super::provision::RuntimePaths;
 use super::{app_data_root, ProvisionEvent};
-
-#[cfg(windows)]
-use std::process::Command;
-
-#[cfg(windows)]
-use super::process::hide_console;
 
 const BIN_DIR_NAME: &str = "bin";
 
@@ -28,7 +29,7 @@ pub struct PathBridge {
     pub prepend: Vec<PathBuf>,
 }
 
-/// Write `dsh` shims and return a PATH that includes every required CLI directory.
+/// Write `dsh` / `pnpm` shims and return a PATH that includes every required CLI directory.
 pub fn prepare_host_path(
     paths: &RuntimePaths,
     progress: impl Fn(ProvisionEvent),
@@ -36,11 +37,18 @@ pub fn prepare_host_path(
     progress(ProvisionEvent::Status(
         "正在写入 dsh 命令并加入 PATH…".into(),
     ));
-    let bridge = install_path_bridge(paths)?;
+    let bridge = match install_path_bridge(paths) {
+        Ok(bridge) => bridge,
+        Err(error) => {
+            boot_log::info(&format!("path bridge install fallback: {error}"));
+            return Ok(merge_path(Some(discovery_path()), &[]));
+        }
+    };
     if let Err(error) = persist_user_path(&bridge) {
         boot_log::info(&format!("user PATH persist skipped: {error}"));
     }
     let merged = merge_path(Some(discovery_path()), &bridge.prepend);
+    std::env::set_var("PATH", &merged);
     boot_log::info(&format!(
         "path bridge bin={} prepend={}",
         bridge.bin_dir.display(),
@@ -57,8 +65,15 @@ pub fn prepare_host_path(
 /// Create shims and collect directories that must precede the inherited PATH.
 pub fn install_path_bridge(paths: &RuntimePaths) -> Result<PathBridge, String> {
     let bin_dir = app_data_root()?.join(BIN_DIR_NAME);
-    fs::create_dir_all(&bin_dir).map_err(|e| e.to_string())?;
-    write_dsh_shims(&bin_dir, &paths.node_binary, &paths.cli_entry)?;
+    fs::create_dir_all(&bin_dir).map_err(|e| recoverable_message("create", &bin_dir, e))?;
+    write_cli_shims(
+        &bin_dir,
+        &paths.node_binary,
+        &paths.cli_entry,
+        &paths.pnpm_binary,
+        &paths.dsh_home,
+        true,
+    )?;
 
     let node_dir = paths.node_binary.parent().map(Path::to_path_buf);
     let pnpm_dir = paths.pnpm_binary.parent().map(Path::to_path_buf);
@@ -97,33 +112,181 @@ pub fn merge_path(existing: Option<impl AsRef<std::ffi::OsStr>>, prepend: &[Path
         .unwrap_or_else(|_| prepend[0].display().to_string())
 }
 
-fn write_dsh_shims(bin_dir: &Path, node: &Path, cli_entry: &Path) -> Result<(), String> {
-    let node = quote_for_cmd(node);
-    let cli = quote_for_cmd(cli_entry);
+/// Write Host-facing `dsh` / `pnpm` shims. `install_exe` copies the desktop binary as `dsh.exe`.
+pub fn write_cli_shims(
+    bin_dir: &Path,
+    node: &Path,
+    cli_entry: &Path,
+    pnpm: &Path,
+    dsh_home: &Path,
+    install_exe: bool,
+) -> Result<(), String> {
+    write_dsh_cmd_shim(bin_dir, node, cli_entry)?;
+    write_launch_spec(bin_dir, node, cli_entry, dsh_home)?;
+    write_pnpm_shim(bin_dir, node, pnpm)?;
+    if install_exe {
+        install_dsh_exe(bin_dir)?;
+    }
+    Ok(())
+}
+
+fn write_dsh_cmd_shim(bin_dir: &Path, node: &Path, cli_entry: &Path) -> Result<(), String> {
+    let node_q = quote_for_cmd(node);
+    let cli_q = quote_for_cmd(cli_entry);
 
     #[cfg(windows)]
     {
-        fs::write(
-            bin_dir.join("dsh.cmd"),
-            format!("@echo off\r\n{node} {cli} %*\r\n"),
-        )
-        .map_err(|e| e.to_string())?;
-        fs::write(
-            bin_dir.join("dsh"),
-            format!("#!/bin/sh\nexec {node} {cli} \"$@\"\n"),
-        )
-        .map_err(|e| e.to_string())?;
+        // An extensionless `dsh` on Windows shadows `dsh.cmd` for Node spawn('dsh').
+        let _ = fs::remove_file(bin_dir.join("dsh"));
+        let dest = bin_dir.join("dsh.cmd");
+        fs::write(&dest, format!("@echo off\r\n{node_q} {cli_q} %*\r\n"))
+            .map_err(|e| recoverable_message("write", &dest, e))?;
     }
 
     #[cfg(not(windows))]
     {
         let script = bin_dir.join("dsh");
-        fs::write(&script, format!("#!/bin/sh\nexec {node} {cli} \"$@\"\n"))
-            .map_err(|e| e.to_string())?;
+        fs::write(&script, format!("#!/bin/sh\nexec {node_q} {cli_q} \"$@\"\n"))
+            .map_err(|e| recoverable_message("write", &script, e))?;
         set_executable(&script)?;
     }
 
     Ok(())
+}
+
+fn write_launch_spec(
+    bin_dir: &Path,
+    node: &Path,
+    cli_entry: &Path,
+    dsh_home: &Path,
+) -> Result<(), String> {
+    let spec = DshLaunchSpec {
+        node: node.display().to_string(),
+        cli: cli_entry.display().to_string(),
+        dsh_home: dsh_home.display().to_string(),
+    };
+    let raw = serde_json::to_string_pretty(&spec).map_err(|e| e.to_string())?;
+    let dest = bin_dir.join(LAUNCH_FILE);
+    fs::write(&dest, format!("{raw}\n")).map_err(|e| recoverable_message("write", &dest, e))
+}
+
+fn write_pnpm_shim(bin_dir: &Path, node: &Path, pnpm: &Path) -> Result<(), String> {
+    let body = pnpm_shim_body(node, pnpm);
+
+    #[cfg(windows)]
+    {
+        let dest = bin_dir.join("pnpm.cmd");
+        fs::write(&dest, body).map_err(|e| recoverable_message("write", &dest, e))?;
+    }
+
+    #[cfg(not(windows))]
+    {
+        let script = bin_dir.join("pnpm");
+        fs::write(&script, body).map_err(|e| recoverable_message("write", &script, e))?;
+        set_executable(&script)?;
+    }
+
+    Ok(())
+}
+
+fn pnpm_shim_body(node: &Path, pnpm: &Path) -> String {
+    if let Some(cjs) = find_pnpm_cjs(pnpm) {
+        #[cfg(windows)]
+        {
+            return format!(
+                "@echo off\r\n{} {} %*\r\n",
+                quote_for_cmd(node),
+                quote_for_cmd(&cjs)
+            );
+        }
+        #[cfg(not(windows))]
+        {
+            return format!(
+                "#!/bin/sh\nexec {} {} \"$@\"\n",
+                quote_for_cmd(node),
+                quote_for_cmd(&cjs)
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        if pnpm
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
+        {
+            return format!("@echo off\r\ncall {} %*\r\n", quote_for_cmd(pnpm));
+        }
+        format!("@echo off\r\n{} %*\r\n", quote_for_cmd(pnpm))
+    }
+
+    #[cfg(not(windows))]
+    {
+        format!("#!/bin/sh\nexec {} \"$@\"\n", quote_for_cmd(pnpm))
+    }
+}
+
+fn find_pnpm_cjs(pnpm: &Path) -> Option<PathBuf> {
+    let dir = pnpm.parent()?;
+    let candidates = [
+        dir.join("node_modules").join("pnpm").join("bin").join("pnpm.cjs"),
+        dir.join("lib")
+            .join("node_modules")
+            .join("pnpm")
+            .join("bin")
+            .join("pnpm.cjs"),
+        dir.join("pnpm").join("bin").join("pnpm.cjs"),
+    ];
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+fn install_dsh_exe(bin_dir: &Path) -> Result<(), String> {
+    let Ok(source) = std::env::current_exe() else {
+        return Ok(());
+    };
+    if source
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| stem.eq_ignore_ascii_case("dsh"))
+    {
+        return Ok(());
+    }
+    let dest = bin_dir.join("dsh.exe");
+    if same_exe(&source, &dest) {
+        return Ok(());
+    }
+    match fs::remove_file(&dest) {
+        Ok(()) => {}
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => {
+            boot_log::info(&format!(
+                "dsh.exe refresh skipped ({}): {error}",
+                dest.display()
+            ));
+            return Ok(());
+        }
+    }
+    if fs::hard_link(&source, &dest).is_ok() {
+        boot_log::info(&format!("dsh.exe hard-linked from {}", source.display()));
+        return Ok(());
+    }
+    fs::copy(&source, &dest).map_err(|e| format!("无法写入 {}: {e}", dest.display()))?;
+    boot_log::info(&format!("dsh.exe copied from {}", source.display()));
+    Ok(())
+}
+
+fn same_exe(left: &Path, right: &Path) -> bool {
+    if !left.is_file() || !right.is_file() {
+        return false;
+    }
+    if path_eq(left, right) {
+        return true;
+    }
+    match (fs::canonicalize(left), fs::canonicalize(right)) {
+        (Ok(a), Ok(b)) => path_eq(&a, &b),
+        _ => false,
+    }
 }
 
 fn companion_tool_dirs() -> Vec<PathBuf> {
@@ -202,58 +365,89 @@ fn persist_windows_user_path_if_missing(
     let Some(dir) = dir else {
         return Ok(());
     };
-    if names.iter().any(|name| which_on_host(name).is_some()) {
+    if names.iter().any(|name| host_has_spawnable(name)) {
         return Ok(());
     }
     persist_windows_user_path(dir)
 }
 
 #[cfg(windows)]
+fn host_has_spawnable(name: &str) -> bool {
+    which_on_host(name)
+        .map(|path| is_direct_spawnable_cli(&path))
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
 fn persist_windows_user_path(dir: &Path) -> Result<(), String> {
     let current = read_windows_user_path()?;
-    let dir_text = dir.display().to_string();
     if path_string_contains(&current, dir) {
         return Ok(());
     }
+    let dir_text = dir.display().to_string();
     let next = if current.trim().is_empty() {
         dir_text
     } else {
         format!("{current};{dir_text}")
     };
-    let mut cmd = Command::new("powershell");
-    cmd.args([
-        "-NoProfile",
-        "-Command",
-        "[Environment]::SetEnvironmentVariable('Path', $env:DSH_NEW_USER_PATH, 'User')",
-    ])
-    .env("DSH_NEW_USER_PATH", &next);
-    hide_console(&mut cmd);
-    let status = cmd
-        .status()
-        .map_err(|e| format!("无法写入用户 PATH: {e}"))?;
-    if !status.success() {
-        return Err(format!("写入用户 PATH 失败 (exit {status})"));
-    }
+    write_windows_user_path(&next)?;
+    broadcast_environment_change();
     boot_log::info(&format!("user PATH appended {}", dir.display()));
     Ok(())
 }
 
 #[cfg(windows)]
 fn read_windows_user_path() -> Result<String, String> {
-    let mut cmd = Command::new("powershell");
-    cmd.args([
-        "-NoProfile",
-        "-Command",
-        "[Environment]::GetEnvironmentVariable('Path','User')",
-    ]);
-    hide_console(&mut cmd);
-    let output = cmd
-        .output()
-        .map_err(|e| format!("无法读取用户 PATH: {e}"))?;
-    if !output.status.success() {
-        return Err("读取用户 PATH 失败".into());
+    let env = open_user_environment(false)?;
+    match env.get_value::<String, _>("Path") {
+        Ok(value) => Ok(value),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(format!("无法读取用户 PATH: {error}")),
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(windows)]
+fn write_windows_user_path(value: &str) -> Result<(), String> {
+    use winreg::enums::RegType::REG_EXPAND_SZ;
+    use winreg::types::ToRegValue;
+    let env = open_user_environment(true)?;
+    let mut raw = value.to_reg_value();
+    raw.vtype = REG_EXPAND_SZ;
+    env.set_raw_value("Path", &raw)
+        .map_err(|e| format!("无法写入用户 PATH: {e}"))
+}
+
+#[cfg(windows)]
+fn open_user_environment(write: bool) -> Result<winreg::RegKey, String> {
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
+    let hkcu = winreg::RegKey::predef(HKEY_CURRENT_USER);
+    let flags = if write {
+        KEY_READ | KEY_WRITE
+    } else {
+        KEY_READ
+    };
+    hkcu.open_subkey_with_flags("Environment", flags)
+        .map_err(|e| format!("无法打开 HKCU\\Environment: {e}"))
+}
+
+#[cfg(windows)]
+fn broadcast_environment_change() {
+    use windows::core::w;
+    use windows::Win32::Foundation::{LPARAM, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE,
+    };
+    unsafe {
+        let _ = SendMessageTimeoutW(
+            HWND_BROADCAST,
+            WM_SETTINGCHANGE,
+            WPARAM(0),
+            LPARAM(w!("Environment").as_ptr() as isize),
+            SMTO_ABORTIFHUNG,
+            5000,
+            None,
+        );
+    }
 }
 
 #[cfg(not(windows))]
@@ -354,12 +548,13 @@ fn path_string_contains(path: &str, candidate: &Path) -> bool {
     std::env::split_paths(path).any(|dir| path_eq(&dir, candidate))
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::{
-        merge_path, path_string_contains, quote_for_cmd, tool_exists_in, write_dsh_shims,
+        merge_path, path_string_contains, pnpm_shim_body, quote_for_cmd, tool_exists_in,
+        write_cli_shims,
     };
+    use crate::cli_shim::{read_launch_spec, LAUNCH_FILE};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -402,31 +597,66 @@ mod tests {
     }
 
     #[test]
-    fn writes_dsh_shim_that_points_at_the_selected_node_and_cli() {
+    fn writes_spawnable_dsh_and_pnpm_shims() {
         let root = temp_root();
         let bin = root.join("bin");
         fs::create_dir_all(&bin).unwrap();
+        fs::write(bin.join("dsh"), "#!/bin/sh\nold\n").unwrap();
         let node = root.join("node.exe");
         let cli = root.join("apps").join("cli").join("lib").join("bin.js");
-        write_dsh_shims(&bin, &node, &cli).unwrap();
+        let pnpm_home = root.join("pnpm-global");
+        let pnpm_cjs = pnpm_home
+            .join("node_modules")
+            .join("pnpm")
+            .join("bin")
+            .join("pnpm.cjs");
+        fs::create_dir_all(pnpm_cjs.parent().unwrap()).unwrap();
+        fs::write(&pnpm_cjs, "module.exports = {}\n").unwrap();
+        let pnpm = pnpm_home.join("pnpm.cmd");
+        let home = root.join("dsh-home");
+        write_cli_shims(&bin, &node, &cli, &pnpm, &home, false).unwrap();
 
         #[cfg(windows)]
         {
+            assert!(!bin.join("dsh").is_file());
             let cmd = fs::read_to_string(bin.join("dsh.cmd")).unwrap();
             assert!(cmd.contains("node.exe"));
             assert!(cmd.contains("bin.js"));
             assert!(cmd.contains("%*"));
-            let sh = fs::read_to_string(bin.join("dsh")).unwrap();
-            assert!(sh.contains("exec"));
-            assert!(sh.contains("\"$@\""));
+            let pnpm_cmd = fs::read_to_string(bin.join("pnpm.cmd")).unwrap();
+            assert!(pnpm_cmd.contains("node.exe"));
+            assert!(pnpm_cmd.contains("pnpm.cjs"));
+            let spec = read_launch_spec(&bin.join(LAUNCH_FILE)).unwrap();
+            assert!(spec.cli.contains("bin.js"));
+            assert!(spec.dsh_home.contains("dsh-home"));
         }
         #[cfg(not(windows))]
         {
             let sh = fs::read_to_string(bin.join("dsh")).unwrap();
             assert!(sh.starts_with("#!/bin/sh"));
             assert!(sh.contains("bin.js"));
+            let pnpm_sh = fs::read_to_string(bin.join("pnpm")).unwrap();
+            assert!(pnpm_sh.contains("pnpm.cjs"));
         }
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn pnpm_shim_falls_back_to_calling_a_cmd_when_cjs_is_missing() {
+        let body = pnpm_shim_body(
+            Path::new(r"C:\Program Files\nodejs\node.exe"),
+            Path::new(r"C:\Users\me\AppData\Roaming\npm\pnpm.cmd"),
+        );
+        #[cfg(windows)]
+        {
+            assert!(body.contains("call"));
+            assert!(body.contains("pnpm.cmd"));
+        }
+        #[cfg(not(windows))]
+        {
+            assert!(body.contains("exec"));
+            assert!(body.contains("pnpm.cmd"));
+        }
     }
 
     #[test]

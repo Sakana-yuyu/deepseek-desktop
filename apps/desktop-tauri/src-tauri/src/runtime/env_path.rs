@@ -4,6 +4,9 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 #[cfg(windows)]
+use std::sync::OnceLock;
+
+#[cfg(windows)]
 use std::process::Command;
 
 #[cfg(windows)]
@@ -42,6 +45,30 @@ pub fn durable_dsh_home() -> Option<PathBuf> {
         read_windows_env("DSH_HOME", "Machine"),
     ])
     .map(|raw| expand_home_prefix(&raw))
+}
+
+/// True when Node `spawn(name)` can run this file without a shell.
+///
+/// Windows `spawn('dsh')` / `spawnSync('pnpm')` accept `.exe` / `.cmd` / `.bat` /
+/// `.com`. A `.ps1` or extensionless file is visible to PowerShell but yields
+/// `ENOENT` for those lookups.
+pub fn is_direct_spawnable_cli(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        matches!(
+            path.extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.eq_ignore_ascii_case("exe")
+                    || ext.eq_ignore_ascii_case("cmd")
+                    || ext.eq_ignore_ascii_case("bat")
+                    || ext.eq_ignore_ascii_case("com")),
+            Some(true)
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        !path.as_os_str().is_empty()
+    }
 }
 
 /// True when two filesystem paths name the same location for PATH / home matching.
@@ -134,6 +161,24 @@ fn normalize_windows_path(path: &Path) -> String {
 
 #[cfg(windows)]
 fn read_windows_env(name: &str, scope: &str) -> Option<String> {
+    type EnvCache = std::sync::Mutex<std::collections::HashMap<(String, String), Option<String>>>;
+    static CACHE: OnceLock<EnvCache> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let key = (name.to_string(), scope.to_string());
+    if let Ok(guard) = cache.lock() {
+        if let Some(hit) = guard.get(&key) {
+            return hit.clone();
+        }
+    }
+    let value = read_windows_env_uncached(name, scope);
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(key, value.clone());
+    }
+    value
+}
+
+#[cfg(windows)]
+fn read_windows_env_uncached(name: &str, scope: &str) -> Option<String> {
     let mut cmd = Command::new("powershell");
     cmd.args([
         "-NoProfile",
@@ -155,8 +200,17 @@ fn read_windows_env(name: &str, scope: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{append_unique_path, path_eq};
-    use std::path::PathBuf;
+    use super::{append_unique_path, is_direct_spawnable_cli, path_eq};
+    use std::path::{Path, PathBuf};
+
+    #[cfg(windows)]
+    #[test]
+    fn treats_cmd_and_exe_as_spawnable_and_rejects_ps1() {
+        assert!(is_direct_spawnable_cli(Path::new(r"C:\npm\pnpm.cmd")));
+        assert!(is_direct_spawnable_cli(Path::new(r"C:\bin\dsh.exe")));
+        assert!(!is_direct_spawnable_cli(Path::new(r"C:\npm\pnpm.ps1")));
+        assert!(!is_direct_spawnable_cli(Path::new(r"C:\bin\dsh")));
+    }
 
     #[cfg(windows)]
     #[test]

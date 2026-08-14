@@ -168,7 +168,7 @@ async fn wait_for_http(
         .map_err(|e| e.to_string())?;
 
     let deadline = tokio::time::Instant::now() + timeout;
-    let mut consecutive_ok = 0u8;
+    let mut logged_failure = false;
 
     loop {
         if tokio::time::Instant::now() >= deadline {
@@ -184,31 +184,27 @@ async fn wait_for_http(
 
         match client.get(url).send().await {
             Ok(response) if response.status().is_success() => {
-                consecutive_ok += 1;
-                if consecutive_ok >= 3 {
-                    boot_log::info(&format!(
-                        "http ready status={} url={url}",
-                        response.status()
-                    ));
-                    return Ok(());
-                }
+                boot_log::info(&format!(
+                    "http ready status={} url={url}",
+                    response.status()
+                ));
+                return Ok(());
             }
             Ok(response) => {
                 boot_log::info(&format!(
                     "health probe non-success status={} url={url}",
                     response.status()
                 ));
-                consecutive_ok = 0;
             }
             Err(err) => {
-                if consecutive_ok == 0 {
+                if !logged_failure {
                     boot_log::info(&format!("health probe failed url={url} err={err}"));
+                    logged_failure = true;
                 }
-                consecutive_ok = 0;
             }
         }
 
-        tokio::time::sleep(Duration::from_millis(400)).await;
+        tokio::time::sleep(Duration::from_millis(150)).await;
     }
 }
 

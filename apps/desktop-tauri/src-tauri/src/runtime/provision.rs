@@ -18,6 +18,7 @@ use super::host_env::{
     node_binary_compatible, pnpm_binary_usable, scan_host_toolchain, toolchain_status,
 };
 use super::process::hide_console;
+use super::io_fallback::{is_recoverable_io, recoverable_message};
 use super::user_home::{resolve_user_home, user_home_status};
 use super::{app_data_root, ProvisionEvent};
 
@@ -79,37 +80,29 @@ pub async fn ensure_runtime(
         .join("lib")
         .join("bin.js");
 
-    progress(ProvisionEvent::Status("正在扫描本机 Node / pnpm…".into()));
-    progress(ProvisionEvent::Progress(3));
-    let toolchain = scan_host_toolchain(&preferred_node, &preferred_pnpm);
-    progress(ProvisionEvent::Status(toolchain_status(&toolchain)));
-
     progress(ProvisionEvent::Status("正在匹配已有对话与密钥…".into()));
     progress(ProvisionEvent::Progress(8));
-    let user_home = resolve_user_home(&isolated_home)?;
+    let user_home = resolve_user_home(&isolated_home);
     let dsh_home = user_home.path.clone();
     progress(ProvisionEvent::Status(user_home_status(
         &user_home,
         &isolated_home,
     )));
 
-    let mut node_binary = toolchain.node.unwrap_or_else(|| preferred_node.clone());
-    let mut pnpm_binary = toolchain.pnpm.unwrap_or_else(|| preferred_pnpm.clone());
-
     if manifest_ready(
         &manifest_path,
         &bundled,
-        &node_binary,
-        &pnpm_binary,
+        &preferred_node,
+        &preferred_pnpm,
         &harness_root,
         &cli_entry,
-    )? {
+    ) {
         boot_log::info("provision skipped: manifest ready");
         progress(ProvisionEvent::Status("运行环境已就绪".into()));
         progress(ProvisionEvent::Progress(100));
         return Ok(RuntimePaths {
-            node_binary,
-            pnpm_binary,
+            node_binary: preferred_node,
+            pnpm_binary: preferred_pnpm,
             cli_entry,
             harness_root,
             runtime_root,
@@ -117,13 +110,42 @@ pub async fn ensure_runtime(
         });
     }
 
+    progress(ProvisionEvent::Status("正在扫描本机 Node / pnpm…".into()));
+    progress(ProvisionEvent::Progress(3));
+    let toolchain = scan_host_toolchain(&preferred_node, &preferred_pnpm);
+    progress(ProvisionEvent::Status(toolchain_status(&toolchain)));
+
+    let mut node_binary = toolchain.node.unwrap_or_else(|| preferred_node.clone());
+    let mut pnpm_binary = toolchain.pnpm.unwrap_or_else(|| preferred_pnpm.clone());
+
     boot_log::info("provision starting: seed harness + node + pnpm install");
-    fs::create_dir_all(&runtime_root).map_err(|e| e.to_string())?;
-    fs::create_dir_all(&dsh_home).map_err(|e| e.to_string())?;
+    if let Err(error) = fs::create_dir_all(&runtime_root) {
+        boot_log::info(&recoverable_message("create runtime", &runtime_root, error));
+    }
+    if let Err(error) = fs::create_dir_all(&dsh_home) {
+        boot_log::info(&recoverable_message("create home", &dsh_home, error));
+    }
 
     progress(ProvisionEvent::Status("正在释放 harness 源码…".into()));
     progress(ProvisionEvent::Progress(12));
-    seed_harness_tree(&bundled, &harness_root)?;
+    let mut harness_root = harness_root;
+    let mut cli_entry = cli_entry;
+    if let Err(error) = seed_harness_tree(&bundled, &harness_root) {
+        boot_log::info(&format!("seed fallback: {error}"));
+        if !cli_entry.is_file() {
+            if let Some(existing) = find_existing_harness(&app_root) {
+                boot_log::info(&format!("reusing harness {}", existing.display()));
+                harness_root = existing;
+                cli_entry = harness_root
+                    .join("apps")
+                    .join("cli")
+                    .join("lib")
+                    .join("bin.js");
+            } else if !is_recoverable_io(&error) {
+                return Err(error);
+            }
+        }
+    }
 
     if node_binary_compatible(&node_binary) {
         boot_log::info(&format!("reusing Node {}", node_binary.display()));
@@ -135,8 +157,16 @@ pub async fn ensure_runtime(
             DEFAULT_NODE_VERSION
         )));
         progress(ProvisionEvent::Progress(15));
-        fetch_node(&node_dir, DEFAULT_NODE_VERSION, &progress).await?;
-        node_binary = preferred_node;
+        if let Err(error) = fetch_node(&node_dir, DEFAULT_NODE_VERSION, &progress).await {
+            boot_log::info(&format!("node download fallback: {error}"));
+            if preferred_node.is_file() {
+                node_binary = preferred_node;
+            } else if !is_recoverable_io(&error) {
+                return Err(error);
+            }
+        } else {
+            node_binary = preferred_node;
+        }
     }
 
     if pnpm_binary_usable(&pnpm_binary) {
@@ -149,15 +179,28 @@ pub async fn ensure_runtime(
             DEFAULT_PNPM_VERSION
         )));
         progress(ProvisionEvent::Progress(35));
-        install_pnpm(&node_binary, &pnpm_home, DEFAULT_PNPM_VERSION)?;
-        pnpm_binary = preferred_pnpm;
+        if let Err(error) = install_pnpm(&node_binary, &pnpm_home, DEFAULT_PNPM_VERSION) {
+            boot_log::info(&format!("pnpm install fallback: {error}"));
+            if preferred_pnpm.is_file() {
+                pnpm_binary = preferred_pnpm;
+            } else if !is_recoverable_io(&error) {
+                return Err(error);
+            }
+        } else {
+            pnpm_binary = preferred_pnpm;
+        }
     }
 
     progress(ProvisionEvent::Status(
         "正在从镜像安装依赖 (pnpm install --prod --no-frozen-lockfile)…".into(),
     ));
     progress(ProvisionEvent::Progress(50));
-    pnpm_install_harness(&node_binary, &pnpm_binary, &harness_root)?;
+    if let Err(error) = pnpm_install_harness(&node_binary, &pnpm_binary, &harness_root) {
+        boot_log::info(&format!("pnpm install harness fallback: {error}"));
+        if !harness_root.join("node_modules").join(".pnpm").is_dir() && !is_recoverable_io(&error) {
+            return Err(error);
+        }
+    }
 
     if !cli_entry.is_file() {
         return Err(format!(
@@ -166,13 +209,15 @@ pub async fn ensure_runtime(
         ));
     }
 
-    write_manifest(
+    if let Err(error) = write_manifest(
         &manifest_path,
         &bundled,
         &node_binary,
         &harness_root,
         &cli_entry,
-    )?;
+    ) {
+        boot_log::info(&format!("manifest write skipped: {error}"));
+    }
 
     progress(ProvisionEvent::Status("运行环境已就绪".into()));
     progress(ProvisionEvent::Progress(100));
@@ -249,7 +294,7 @@ fn resolve_local_repo() -> Result<RuntimePaths, String> {
     });
 
     let isolated_home = app_data_root()?.join("dsh-home");
-    let dsh_home = resolve_user_home(&isolated_home)?.path;
+    let dsh_home = resolve_user_home(&isolated_home).path;
 
     Ok(RuntimePaths {
         node_binary,
@@ -268,21 +313,113 @@ fn manifest_ready(
     pnpm_binary: &Path,
     harness_root: &Path,
     cli_entry: &Path,
-) -> Result<bool, String> {
+) -> bool {
     if !manifest_path.is_file()
         || !node_binary.is_file()
         || !pnpm_binary.is_file()
         || !cli_entry.is_file()
         || !harness_root.join("node_modules").join(".pnpm").is_dir()
     {
-        return Ok(false);
+        return false;
     }
 
-    let raw = fs::read_to_string(manifest_path).map_err(|e| e.to_string())?;
-    let parsed: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-    let bundle_ok = read_bundle_hash(bundled)? == parsed["bundleSha256"].as_str().unwrap_or("");
-    let node_ok = file_sha256(node_binary)? == parsed["nodeSha256"].as_str().unwrap_or("");
-    Ok(bundle_ok && node_ok)
+    let Ok(raw) = fs::read_to_string(manifest_path) else {
+        return false;
+    };
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return false;
+    };
+    let Ok(bundle_hash) = read_bundle_hash(bundled) else {
+        return false;
+    };
+    bundle_hash == parsed["bundleSha256"].as_str().unwrap_or("")
+        && node_matches_manifest(node_binary, &parsed)
+}
+
+fn node_matches_manifest(node_binary: &Path, parsed: &serde_json::Value) -> bool {
+    let Ok(meta) = fs::metadata(node_binary) else {
+        return false;
+    };
+    if let Some(bytes) = parsed["nodeBytes"].as_u64() {
+        return meta.len() == bytes;
+    }
+    true
+}
+
+/// Rebuild `RuntimePaths` from whatever Node / CLI already exists on disk.
+pub fn try_recover_paths(bundled: Option<&Path>) -> Option<RuntimePaths> {
+    let app_root = app_data_root().ok()?;
+    let runtime_root = app_root.join("runtime");
+    let isolated_home = app_root.join("dsh-home");
+    let preferred_node = node_binary_path(&runtime_root.join("node"));
+    let preferred_pnpm = pnpm_binary_path(&runtime_root.join("pnpm-global"));
+    let toolchain = scan_host_toolchain(&preferred_node, &preferred_pnpm);
+    let node_binary = toolchain.node.filter(|path| path.is_file()).or_else(|| {
+        preferred_node.is_file().then_some(preferred_node)
+    })?;
+    let pnpm_binary = toolchain.pnpm.filter(|path| path.is_file()).or_else(|| {
+        preferred_pnpm.is_file().then_some(preferred_pnpm)
+    })?;
+    let harness_root = bundled
+        .and_then(|source| read_bundle_hash(source).ok())
+        .map(|hash| harness_root_for_bundle(&app_root, &hash))
+        .filter(|path| {
+            path.join("apps")
+                .join("cli")
+                .join("lib")
+                .join("bin.js")
+                .is_file()
+        })
+        .or_else(|| find_existing_harness(&app_root))?;
+    let cli_entry = harness_root
+        .join("apps")
+        .join("cli")
+        .join("lib")
+        .join("bin.js");
+    if !cli_entry.is_file() {
+        return None;
+    }
+    let dsh_home = resolve_user_home(&isolated_home).path;
+    Some(RuntimePaths {
+        node_binary,
+        pnpm_binary,
+        cli_entry,
+        harness_root,
+        runtime_root,
+        dsh_home,
+    })
+}
+
+fn find_existing_harness(app_root: &Path) -> Option<PathBuf> {
+    let versions = app_root.join(HARNESS_VERSIONS_DIR);
+    if let Ok(entries) = fs::read_dir(&versions) {
+        let mut dirs: Vec<PathBuf> = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .collect();
+        dirs.sort();
+        dirs.reverse();
+        for dir in dirs {
+            if dir
+                .join("apps")
+                .join("cli")
+                .join("lib")
+                .join("bin.js")
+                .is_file()
+            {
+                return Some(dir);
+            }
+        }
+    }
+    let legacy = app_root.join("harness");
+    legacy
+        .join("apps")
+        .join("cli")
+        .join("lib")
+        .join("bin.js")
+        .is_file()
+        .then_some(legacy)
 }
 
 fn read_bundle_hash(bundled: &Path) -> Result<String, String> {
@@ -341,7 +478,8 @@ fn write_manifest(
         "harnessVersion": read_bundle_version(bundled)?,
         "nodeVersion": DEFAULT_NODE_VERSION,
         "pnpmVersion": DEFAULT_PNPM_VERSION,
-        "nodeSha256": file_sha256(node_binary)?,
+        "nodeBytes": fs::metadata(node_binary).map(|meta| meta.len()).unwrap_or(0),
+        "nodePath": node_binary.display().to_string(),
         "cliSha256": file_sha256(cli_entry)?,
         "harnessRoot": harness_root.display().to_string(),
         "provisionedAt": std::time::SystemTime::now()
@@ -370,25 +508,45 @@ fn read_bundle_version(bundled: &Path) -> Result<String, String> {
 }
 
 fn seed_harness_tree(source: &Path, dest: &Path) -> Result<(), String> {
+    let cli = dest.join("apps").join("cli").join("lib").join("bin.js");
     if dest.exists() {
-        fs::remove_dir_all(dest).map_err(|e| e.to_string())?;
+        if let Err(error) = fs::remove_dir_all(dest) {
+            let message = recoverable_message("seed remove", dest, error);
+            if cli.is_file() {
+                boot_log::info(&format!("{message}; reusing existing tree"));
+                return Ok(());
+            }
+            return Err(message);
+        }
     }
-    copy_tree(source, dest)?;
-    Ok(())
+    match copy_tree(source, dest) {
+        Ok(()) => Ok(()),
+        Err(error) if cli.is_file() => {
+            boot_log::info(&format!(
+                "seed copy skipped {}; reusing {}",
+                error,
+                dest.display()
+            ));
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn copy_tree(source: &Path, dest: &Path) -> Result<(), String> {
     if source.is_file() {
         if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            fs::create_dir_all(parent).map_err(|e| recoverable_message("create", parent, e))?;
         }
-        fs::copy(source, dest).map_err(|e| e.to_string())?;
+        fs::copy(source, dest).map_err(|e| {
+            format!("copy {} -> {}: {e}", source.display(), dest.display())
+        })?;
         return Ok(());
     }
 
-    fs::create_dir_all(dest).map_err(|e| e.to_string())?;
-    for entry in fs::read_dir(source).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
+    fs::create_dir_all(dest).map_err(|e| recoverable_message("create", dest, e))?;
+    for entry in fs::read_dir(source).map_err(|e| recoverable_message("read", source, e))? {
+        let entry = entry.map_err(|e| recoverable_message("read", source, e))?;
         let name = entry.file_name();
         if name == "node_modules" {
             continue;
@@ -399,7 +557,7 @@ fn copy_tree(source: &Path, dest: &Path) -> Result<(), String> {
 }
 
 fn file_sha256(path: &Path) -> Result<String, String> {
-    let mut file = File::open(path).map_err(|e| e.to_string())?;
+    let mut file = File::open(path).map_err(|e| format!("无法读取 {}: {e}", path.display()))?;
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 8192];
     loop {
@@ -763,7 +921,11 @@ fn pnpm_install_harness(
 
 #[cfg(test)]
 mod tests {
-    use super::{harness_root_for_bundle, node_archive_spec_for, safe_archive_relative_path};
+    use super::{
+        harness_root_for_bundle, node_archive_spec_for, node_matches_manifest,
+        safe_archive_relative_path,
+    };
+    use std::fs;
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -836,5 +998,27 @@ mod tests {
             Path::new("node-v22.19.0-linux-x64"),
         )
         .is_err());
+    }
+
+    #[test]
+    fn treats_node_byte_size_as_manifest_identity() {
+        let dir = std::env::temp_dir().join(format!(
+            "dsh-node-manifest-{}",
+            std::process::id()
+        ));
+        let _ = fs::create_dir_all(&dir);
+        let node = dir.join("node.exe");
+        fs::write(&node, b"node-binary").unwrap();
+        let bytes = fs::metadata(&node).unwrap().len();
+        assert!(node_matches_manifest(
+            &node,
+            &serde_json::json!({ "nodeBytes": bytes })
+        ));
+        assert!(!node_matches_manifest(
+            &node,
+            &serde_json::json!({ "nodeBytes": bytes + 1 })
+        ));
+        assert!(node_matches_manifest(&node, &serde_json::json!({})));
+        let _ = fs::remove_dir_all(&dir);
     }
 }

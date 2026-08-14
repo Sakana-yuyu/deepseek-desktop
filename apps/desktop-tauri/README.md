@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 Rust/WebView2 shell over the existing `dsh web` UI. The installer ships **harness source** (no `node_modules`); first run scans the host for a compatible Node / pnpm and an existing `~/.dsh` home, downloads **build tools only** when the scan finds none, then runs `pnpm install --prod` against the bundled tree.
 
-Current desktop release: **0.1.0-rc.5-0.3**.
+Current desktop release: **0.1.0-rc.5-0.4**.
 
 ## Architecture
 
@@ -14,8 +14,8 @@ Current desktop release: **0.1.0-rc.5-0.3**.
 | **Build env** | — | Reuse host Node 22.19+ or 24+ and pnpm when present; otherwise Node (npmmirror) and pnpm (via npm + npmmirror registry) |
 | **Dependencies** | — | `pnpm install --prod --no-frozen-lockfile` in the platform application-data directory (trimmed bundle vs lockfile; `CI` unset so pnpm does not force frozen install) |
 | **Host** | — | `node apps/cli/lib/bin.js web --host 127.0.0.1` |
-| **UI** | Local `shell.html` title bar | Frameless window embeds `dsh web`; Windows controls on the right, macOS on the left, Linux from the window-manager button layout |
-| **Tray** | Native tray icon | Close hides to tray; menu shows the window, checks for updates, or quits |
+| **UI** | Local `shell.html` title bar | Frameless window embeds `dsh web`; splash uses the dark tokens; the first close is an in-window light modal matching the web client; Windows controls on the right, macOS on the left, Linux from the window-manager button layout |
+| **Tray** | Native tray icon | First close asks minimize-to-tray vs quit and remembers the answer in `desktop-settings.json`; tray can change that later, show the window, check for updates, or quit |
 | **Notify** | Overlay plugin + localhost POST | `turn/end` with `completed` shows a toast and plays `sounds/complete.wav` when the window is unfocused |
 | **Updates** | Embedded updater public key | Check the stable GitHub update manifest, verify the downloaded artifact signature, install, and restart |
 
@@ -40,10 +40,10 @@ Writable paths live under the platform application-data directory (`%APPDATA%\De
 - `harness-versions/<bundle-hash>/` — bundle-specific source + `node_modules` after first `pnpm install`
 - `runtime/` — Node, pnpm-global, manifest
 - `dsh-home/` — fallback session data when no existing Harness home is found
-- `bin/` — `dsh` shims written onto the Host PATH and, when missing, the user Path
+- `bin/` — spawnable `dsh.exe` / `dsh.cmd` / `pnpm.cmd` written onto the Host PATH and, when missing, the user Path
 - `cache/` — downloaded Node zip or tarball
 
-First launch scans the process `PATH` (on Windows, plus the durable user and machine Path) and well-known install locations for Node `^22.19 || >=24` and a usable pnpm before any mirror fetch. It then adopts `$DSH_HOME` (process or, on Windows, the user/machine environment) or `~/.dsh` when that directory already holds sessions, credentials, `.env`, profiles, or settings, and copies missing files from the isolated `dsh-home/` into the selected home. It writes `dsh` shims and prepends the selected Node / pnpm directories (plus Git `cmd`/`bin` when `git` or `bash` is missing on that discovery PATH) onto the Host PATH so `dsh plugin`, MCP `npx`, and agent `bash`/`git` lookups resolve. The user Path receives the shim directory, and the Node or pnpm directory only when that command is still absent. The provisioner still downloads Node for Windows x64/x86, macOS x64/arm64, and Linux x64/arm64 when the scan finds none. Zip and tar.gz extraction reject entries outside the expected Node archive root. Unix archives retain executable permissions. A privately installed pnpm runs through the selected Node binary; a host pnpm is invoked directly. Bundle-specific harness directories let an update provision new source without deleting files used by an older running Host; compatible Node and pnpm runtimes are reused across source updates. The native shell permits one application instance and focuses the existing window on repeated launches. Release builds check for an update before provisioning; update-network or manifest failures are logged and do not block startup. Window chrome, tray, updater, toast, and completion sound stay in this Rust crate. Host collaboration is an overlay plugin copied into `$DSH_HOME/desktop-overlay` and loaded with `dsh web --patch`; `packages/` is not modified.
+First launch scans the process `PATH` (on Windows, plus the durable user and machine Path) and well-known install locations for Node `^22.19 || >=24` and a usable pnpm before any mirror fetch. It then adopts `$DSH_HOME` (process or, on Windows, the user/machine environment) or `~/.dsh` when that directory already holds sessions, credentials, `.env`, profiles, or settings, and copies missing files from the isolated `dsh-home/` into the selected home. It writes spawnable `dsh` / `pnpm` shims (`dsh.exe` is the desktop binary running as a CLI trampoline) and prepends the selected Node / pnpm directories (plus Git `cmd`/`bin` when `git` or `bash` is missing on that discovery PATH) onto the Host PATH so in-app `spawn('dsh')`, `dsh plugin`, MCP `npx`, and agent `bash`/`git` lookups resolve. Windows does not write an extensionless `dsh` file. The user Path receives the shim directory via the registry, and the Node or pnpm directory only when that command is still absent as a spawnable file. The provisioner still downloads Node for Windows x64/x86, macOS x64/arm64, and Linux x64/arm64 when the scan finds none. Zip and tar.gz extraction reject entries outside the expected Node archive root. Unix archives retain executable permissions. A privately installed pnpm runs through the selected Node binary; a host pnpm is invoked directly. Bundle-specific harness directories let an update provision new source without deleting files used by an older running Host; compatible Node and pnpm runtimes are reused across source updates. The native shell permits one application instance and focuses the existing window on repeated launches. Release builds check for an update after the main window opens; update-network or manifest failures are logged and do not hold the splash. A ready runtime manifest skips the host toolchain scan and compares Node by file size instead of hashing `node.exe`. Window chrome, tray, updater, toast, and completion sound stay in this Rust crate. Host collaboration is an overlay plugin copied into `$DSH_HOME/desktop-overlay` and loaded with `dsh web --patch`; `packages/` is not modified.
 
 ## Build
 
@@ -58,13 +58,13 @@ $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD=(Get-Content "$HOME\.tauri\deepseek-desk
 pnpm run build:win
 ```
 
-Installer output: `src-tauri/target/release/bundle/nsis/DeepSeek Harness_0.1.0-rc.5-0.3_x64-setup.exe`
+Installer output: `src-tauri/target/release/bundle/nsis/DeepSeek Harness_0.1.0-rc.5-0.4_x64-setup.exe`
 
 The NSIS installer bundles **English**, **Simplified Chinese**, and **Traditional Chinese**. Language follows the OS locale automatically (no language picker); if the locale is unsupported, English is used. Before copying files, the installer silently closes `dsh-desktop.exe` and its child process tree. After installation, it recreates an existing desktop shortcut with the versioned standalone ICO resource and notifies Explorer to invalidate stale icon cache entries.
 
 ## Release
 
-Pushing a `desktop-v*` tag runs [the desktop release workflow](../../.github/workflows/desktop-release.yml). It builds Windows x64/x86 NSIS installers, macOS Intel/Apple Silicon DMGs, and Linux x64 AppImage/deb packages, then publishes one GitHub Release after every matrix job succeeds. The workflow signs each updater artifact, generates the Tauri `latest.json`, and replaces the manifest in the stable `desktop-updater` release channel. A manual dispatch rebuilds an existing tag.
+Pushing a `desktop-v*` tag runs [the desktop release workflow](../../.github/workflows/desktop-release.yml). It builds Windows x64/x86 NSIS installers, macOS Intel/Apple Silicon DMGs, and Linux x64 AppImage/deb packages, then publishes one GitHub Release after every matrix job succeeds. The workflow signs each updater artifact, generates the Tauri `latest.json` from the bilingual [release notes](release-notes.md), and replaces the manifest in the stable `desktop-updater` release channel. A manual dispatch rebuilds an existing tag.
 
 Release asset names include the operating system and architecture. Updater signatures authenticate artifacts to installed applications, but the executables are not operating-system code-signed or notarized, so Windows SmartScreen, macOS Gatekeeper, or Linux desktop security prompts may require explicit approval.
 

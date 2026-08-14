@@ -9,7 +9,7 @@ on:
       tag:
         description: Existing desktop-v* tag to rebuild and publish
         required: true
-        default: desktop-v0.1.0-rc.5-0.3
+        default: desktop-v0.1.0-rc.5-0.4
 
 permissions:
   contents: write
@@ -192,7 +192,7 @@ jobs:
             --version $version `
             --repository $env:GITHUB_REPOSITORY `
             --release-tag $env:RELEASE_TAG `
-            --notes "DeepSeek Harness Desktop $version" `
+            --notes-file apps/desktop-tauri/release-notes.md `
             --pub-date $publishedAt
 
       - name: Publish release
@@ -200,30 +200,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          cat > release-notes.md <<'EOF'
-          DeepSeek Harness Desktop is a Tauri/WebView shell for the existing `dsh web` interface.
-
-          The installer contains a trimmed Harness source tree without `node_modules`. On first launch, the app downloads the matching Node runtime and pnpm from the configured mirrors, installs production dependencies, starts the local Harness web host, and opens it in the desktop WebView.
-
-          This build adds signature-verified automatic updates. Windows installation closes a running desktop process before replacing files and refreshes an existing desktop shortcut with the versioned DeepSeek fish icon.
-
-          Included builds:
-          - Windows x64 and x86 NSIS installers
-          - macOS Intel and Apple Silicon DMGs
-          - Linux x64 AppImage and deb packages
-
-          These artifacts are not operating-system code-signed or notarized. Windows SmartScreen, macOS Gatekeeper, or Linux desktop security prompts may require explicit approval.
-          EOF
-
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" release-assets/* --clobber
-            gh release edit "$RELEASE_TAG" --title "DeepSeek Harness Desktop ${RELEASE_TAG#desktop-v}" --notes-file release-notes.md --latest
+            gh release edit "$RELEASE_TAG" --title "DeepSeek Harness Desktop ${RELEASE_TAG#desktop-v}" --notes-file apps/desktop-tauri/release-notes.md --latest
           else
-            gh release create "$RELEASE_TAG" release-assets/* --verify-tag --title "DeepSeek Harness Desktop ${RELEASE_TAG#desktop-v}" --notes-file release-notes.md --latest
+            gh release create "$RELEASE_TAG" release-assets/* --verify-tag --title "DeepSeek Harness Desktop ${RELEASE_TAG#desktop-v}" --notes-file apps/desktop-tauri/release-notes.md --latest
           fi
 
           if gh release view desktop-updater >/dev/null 2>&1; then
             gh release upload desktop-updater release-assets/latest.json --clobber
           else
-            gh release create desktop-updater release-assets/latest.json --target "$(git rev-parse HEAD)" --title "DeepSeek Harness Desktop update channel" --notes "Stable signed-update manifest channel. Installers are published in versioned desktop releases." --prerelease
+            gh release create desktop-updater release-assets/latest.json --target "$(git rev-parse HEAD)" --title "DeepSeek Harness Desktop update channel" --notes "Stable signed-update manifest channel. Installers are published in versioned desktop releases.
+
+稳定的签名更新 manifest 通道。安装包发布在带版本号的 desktop Release 中。" --prerelease
           fi

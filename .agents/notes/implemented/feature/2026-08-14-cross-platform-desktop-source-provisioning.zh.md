@@ -18,7 +18,7 @@ Status: implemented
 
 **一个 tag 发布一套完整桌面矩阵和一份签名更新 manifest。** `desktop-v*` tag 构建 Windows x64/x86 NSIS 安装包、macOS Intel/Apple Silicon DMG，以及 Linux x64 AppImage/deb。每个矩阵任务为其 Tauri 更新产物签名并上传带操作系统和架构标识的文件；下游 release 任务先验证集合完整，再创建或更新一个 GitHub 预发布版本，并替换稳定 `desktop-updater` Release 通道中的 `latest.json`。更新公钥内置于应用，私钥和密码只存在于 Release Secrets 和维护者受保护的备份中。更新签名用于验证下载，但可执行文件仍没有操作系统代码签名，也未经过 notarization。
 
-**Release 构建在预配前检查并安装更新。** 官方 Tauri updater 验证稳定 manifest 和产物签名，安装语义版本更高的版本并重启应用。更新检查或下载失败会写入日志，应用继续使用已安装版本启动。开发构建跳过网络更新检查。
+**Release 构建在主窗口打开后再检查并安装更新。** 官方 Tauri updater 验证稳定 manifest 和产物签名，安装语义版本更高的版本并重启应用。更新检查或下载失败会写入日志，不拖住启动页。开发构建跳过网络更新检查。运行时 manifest 已就绪时跳过主机工具链扫描，并用文件大小比对 Node，不再对 `node.exe` 做 SHA256。
 
 **Windows 安装会关闭运行中的应用，并使陈旧快捷方式图标失效。** NSIS 预安装钩子在复制文件前结束 `dsh-desktop.exe` 及其子进程树。安装后钩子保留用户对桌面快捷方式的选择，使用文件名含版本的独立 ICO 资源重建已有快捷方式，并通知 Explorer 图标关联已变化。
 

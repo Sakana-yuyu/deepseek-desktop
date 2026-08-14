@@ -9,10 +9,11 @@ import {
   createManifest,
   normalizedAssets,
   parseArguments,
+  resolveNotes,
   writeUpdaterManifest,
 } from './generate-updater-manifest.mjs'
 
-const version = '0.1.0-rc.5-0.3'
+const version = '0.1.0-rc.5-0.4'
 const repository = 'deepseek-ai/deepseek-harness'
 const releaseTag = `desktop-v${version}`
 const pubDate = '2026-08-14T00:00:00.000Z'
@@ -139,4 +140,69 @@ test('parseArguments requires every explicit CLI option', () => {
     () => parseArguments(['--assets-dir', 'assets']),
     /missing required option: --output/i,
   )
+})
+
+test('parseArguments accepts --notes-file instead of --notes', () => {
+  const values = parseArguments([
+    '--assets-dir', 'assets',
+    '--output', 'latest.json',
+    '--version', version,
+    '--repository', repository,
+    '--release-tag', releaseTag,
+    '--notes-file', 'release-notes.md',
+    '--pub-date', pubDate,
+  ])
+  assert.equal(values.notesFile, 'release-notes.md')
+  assert.equal(values.notes, undefined)
+})
+
+test('parseArguments rejects both --notes and --notes-file', () => {
+  assert.throws(
+    () => parseArguments([
+      '--assets-dir', 'assets',
+      '--output', 'latest.json',
+      '--version', version,
+      '--repository', repository,
+      '--release-tag', releaseTag,
+      '--notes', 'inline',
+      '--notes-file', 'release-notes.md',
+      '--pub-date', pubDate,
+    ]),
+    /either --notes or --notes-file/i,
+  )
+})
+
+test('resolveNotes reads a bilingual notes file', async () => {
+  await withTempDir(async (directory) => {
+    const notesFile = join(directory, 'release-notes.md')
+    await writeFile(notesFile, 'English notes\n\n中文说明\n')
+    assert.equal(await resolveNotes({ notesFile }), 'English notes\n\n中文说明\n')
+    assert.equal(await resolveNotes({ notes: 'inline' }), 'inline')
+  })
+})
+
+test('CLI writes latest.json from --notes-file', async () => {
+  await withTempDir(async (directory) => {
+    const assetsDir = join(directory, 'assets')
+    const outputPath = join(directory, 'latest.json')
+    const notesFile = join(directory, 'release-notes.md')
+    await mkdir(assetsDir)
+    await writeAssets(assetsDir)
+    await writeFile(notesFile, 'English\n\n中文\n')
+
+    const result = spawnSync(process.execPath, [
+      fileURLToPath(new URL('./generate-updater-manifest.mjs', import.meta.url)),
+      '--assets-dir', assetsDir,
+      '--output', outputPath,
+      '--version', version,
+      '--repository', repository,
+      '--release-tag', releaseTag,
+      '--notes-file', notesFile,
+      '--pub-date', pubDate,
+    ], { encoding: 'utf8' })
+
+    assert.equal(result.status, 0, result.stderr)
+    const manifest = JSON.parse(await readFile(outputPath, 'utf8'))
+    assert.equal(manifest.notes, 'English\n\n中文\n')
+  })
 })

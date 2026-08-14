@@ -2,7 +2,9 @@ pub mod boot_log;
 pub mod config;
 pub mod env_path;
 pub mod host_env;
+pub mod io_fallback;
 pub mod path_bridge;
+pub mod profile_repair;
 mod process;
 pub mod provision;
 pub mod supervisor;
@@ -33,7 +35,19 @@ impl DesktopRuntime {
             paths.cli_entry.display(),
             paths.node_binary.display()
         ));
-        let host_path = path_bridge::prepare_host_path(&paths, |event| progress(event))?;
+        let host_path = match path_bridge::prepare_host_path(&paths, |event| progress(event)) {
+            Ok(path) => path,
+            Err(error) => {
+                boot_log::info(&format!("path bridge fallback: {error}"));
+                path_bridge::merge_path(Some(env_path::discovery_path()), &[])
+            }
+        };
+        progress(ProvisionEvent::Status("正在检查 profile 依赖…".into()));
+        if let Err(error) =
+            profile_repair::ensure_profile_installs(&paths, &host_path, &progress).await
+        {
+            return Err(error);
+        }
         progress(ProvisionEvent::Status("正在启动 Web 界面…".into()));
         let host = supervisor::spawn_web_host(&paths, overlay, &host_path).await?;
         boot_log::info(&format!("dsh web ready url={}", host.web_url));

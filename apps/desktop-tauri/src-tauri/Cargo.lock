@@ -970,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "dsh-desktop"
-version = "0.1.0-rc.5-0.3"
+version = "0.1.0-rc.5-0.4"
 dependencies = [
  "dirs",
  "flate2",
@@ -989,6 +989,8 @@ dependencies = [
  "tokio",
  "url",
  "which",
+ "windows",
+ "winreg",
  "zip 2.4.2",
 ]
 

@@ -1,4 +1,6 @@
 mod chrome;
+mod cli_shim;
+mod desktop_settings;
 mod notify;
 mod overlay;
 mod runtime;
@@ -8,21 +10,26 @@ mod window_layout;
 
 use runtime::boot_log;
 use runtime::config::BUNDLED_HARNESS_DIR;
-use runtime::provision::ensure_runtime;
+use runtime::io_fallback::is_recoverable_io;
+use runtime::provision::{ensure_runtime, try_recover_paths};
 use runtime::supervisor::HostOverlay;
 use runtime::{DesktopRuntime, ProvisionEvent};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, RunEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if cli_shim::should_run_as_cli() {
+        std::process::exit(cli_shim::run());
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             chrome::show_main(app);
         }))
+        .invoke_handler(tauri::generate_handler![chrome::set_close_action])
         .setup(|app| {
             let handle = app.handle().clone();
             let icon = app
@@ -43,8 +50,15 @@ pub fn run() {
             });
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            if let RunEvent::ExitRequested { api, .. } = event {
+                if !chrome::quit_requested() {
+                    api.prevent_exit();
+                }
+            }
+        });
 }
 
 fn resolve_bundled_source(app: &AppHandle) -> Option<PathBuf> {
@@ -83,35 +97,73 @@ async fn boot_app(app: AppHandle, bundled: Option<PathBuf>) -> Result<(), String
             });
         });
 
-    if let Err(error) = updater::install_available(&app, Arc::clone(&progress)).await {
-        boot_log::error(&format!("desktop update skipped: {error}"));
-        progress(ProvisionEvent::Status("更新检查失败，正在继续启动…".into()));
-    }
-
-    let notify = notify::start(app.clone())?;
-    let paths = ensure_runtime(bundled, {
+    let notify = match notify::start(app.clone()) {
+        Ok(notify) => Some(notify),
+        Err(error) => {
+            boot_log::info(&format!("notify disabled, overlay skipped: {error}"));
+            None
+        }
+    };
+    let paths = match ensure_runtime(bundled.clone(), {
         let progress = Arc::clone(&progress);
         move |event| progress(event)
     })
-    .await?;
-
-    let overlay_src = overlay::resolve_overlay_source(app.path().resource_dir().ok().as_deref());
-    let implanted = overlay::install_overlay(&paths, &overlay_src, &notify.url)?;
-    let host_overlay = HostOverlay {
-        patch_file: implanted.patch_file,
-        notify_url: notify.url.clone(),
+    .await
+    {
+        Ok(paths) => paths,
+        Err(error) => {
+            boot_log::error(&format!("provision failed: {error}"));
+            if let Some(paths) = try_recover_paths(bundled.as_deref()) {
+                progress(ProvisionEvent::Status(
+                    if is_recoverable_io(&error) {
+                        "预配遇到占用或权限问题，改用已有运行时…".into()
+                    } else {
+                        "预配未完成，改用已有运行时…".into()
+                    },
+                ));
+                paths
+            } else if is_recoverable_io(&error) {
+                return Err(
+                    "启动遇到占用或权限问题，未能找到可用运行时。详见 boot.log。".into(),
+                );
+            } else {
+                return Err(error);
+            }
+        }
     };
 
-    let runtime = DesktopRuntime::start(paths, Some(&host_overlay), progress).await?;
+    let overlay_src = overlay::resolve_overlay_source(app.path().resource_dir().ok().as_deref());
+    let host_overlay = notify.as_ref().and_then(|notify| {
+        match overlay::install_overlay(&paths, &overlay_src, &notify.url) {
+            Ok(implanted) => Some(HostOverlay {
+                patch_file: implanted.patch_file,
+                notify_url: notify.url.clone(),
+            }),
+            Err(error) => {
+                boot_log::info(&format!("overlay skipped: {error}"));
+                None
+            }
+        }
+    });
+
+    let runtime = DesktopRuntime::start(paths, host_overlay.as_ref(), progress).await?;
     let web_url = runtime.web_url.clone();
     app.manage(runtime);
-    app.manage(notify);
+    if let Some(notify) = notify {
+        app.manage(notify);
+    }
     boot_log::info(&format!("opening main window url={web_url}"));
     chrome::open_main_window(&app, &web_url)?;
     if let Some(splash) = app.get_webview_window("splash") {
         let _ = splash.close();
     }
     boot_log::info("boot complete");
+    let app_for_update = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = updater::install_available(&app_for_update, Arc::new(|_| {})).await {
+            boot_log::info(&format!("desktop update skipped: {error}"));
+        }
+    });
     Ok(())
 }
 

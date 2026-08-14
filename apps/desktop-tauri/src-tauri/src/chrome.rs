@@ -1,8 +1,32 @@
-//! Frameless main window and custom title-bar commands.
+//! Frameless main window, close preference, and custom title-bar commands.
 
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use std::sync::atomic::{AtomicBool, Ordering};
 
+use tauri::window::Color;
+use tauri::{AppHandle, Manager, Theme, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+
+const DSH_BG: Color = Color(21, 21, 23, 255);
+
+use crate::desktop_settings::{self, CloseAction};
+use crate::notify;
+use crate::runtime::boot_log;
 use crate::window_layout::resolve_controls_layout;
+
+static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// True when the user chose a full process exit (tray Quit or close-action Exit).
+pub fn quit_requested() -> bool {
+    QUIT_REQUESTED.load(Ordering::SeqCst)
+}
+
+/// Exit the process after marking quit so `ExitRequested` is not cancelled.
+pub fn request_quit(app: &AppHandle) {
+    QUIT_REQUESTED.store(true, Ordering::SeqCst);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.destroy();
+    }
+    app.exit(0);
+}
 
 /// Create the frameless shell window that embeds `dsh web`.
 pub fn open_main_window(app: &AppHandle, url: &str) -> Result<(), String> {
@@ -28,6 +52,8 @@ pub fn open_main_window(app: &AppHandle, url: &str) -> Result<(), String> {
         .center()
         .decorations(false)
         .visible(false)
+        .background_color(DSH_BG)
+        .theme(Some(Theme::Dark))
         .initialization_script(&init);
 
     #[cfg(any(target_os = "windows", target_os = "macos"))]
@@ -41,11 +67,11 @@ pub fn open_main_window(app: &AppHandle, url: &str) -> Result<(), String> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    let hide = window.clone();
+    let app_handle = window.app_handle().clone();
     window.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
-            let _ = hide.hide();
+            on_close_requested(&app_handle);
         }
     });
 
@@ -63,5 +89,82 @@ pub fn show_main(app: &AppHandle) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+    }
+}
+
+/// Apply the saved close action, or ask once when none is stored.
+pub fn on_close_requested(app: &AppHandle) {
+    match desktop_settings::load().close_action {
+        Some(CloseAction::Minimize) => hide_main(app),
+        Some(CloseAction::Exit) => request_quit(app),
+        None => {
+            if let Err(error) = open_close_prompt(app) {
+                boot_log::info(&format!("close prompt fallback hide: {error}"));
+                hide_main(app);
+            }
+        }
+    }
+}
+
+/// Persist a close action from the in-window prompt, then apply it.
+#[tauri::command]
+pub fn set_close_action(app: AppHandle, action: String) -> Result<(), String> {
+    let parsed = parse_close_action(&action)?;
+    remember_close_action(&app, parsed)?;
+    hide_close_prompt(&app);
+    match parsed {
+        None => {}
+        Some(CloseAction::Minimize) => hide_main(&app),
+        Some(CloseAction::Exit) => request_quit(&app),
+    }
+    Ok(())
+}
+
+/// Persist a close action from the tray without immediately hiding or quitting.
+pub fn remember_close_action(app: &AppHandle, action: Option<CloseAction>) -> Result<(), String> {
+    save_close_action(action)?;
+    let message = match action {
+        Some(CloseAction::Minimize) => "关闭窗口将最小化到托盘",
+        Some(CloseAction::Exit) => "关闭窗口将退出程序",
+        None => "下次关闭窗口时会再询问",
+    };
+    notify::toast(app, "DeepSeek Harness", message);
+    Ok(())
+}
+
+fn parse_close_action(action: &str) -> Result<Option<CloseAction>, String> {
+    match action {
+        "minimize" => Ok(Some(CloseAction::Minimize)),
+        "exit" => Ok(Some(CloseAction::Exit)),
+        "ask" => Ok(None),
+        other => Err(format!("unknown close action: {other}")),
+    }
+}
+
+fn save_close_action(action: Option<CloseAction>) -> Result<(), String> {
+    let mut settings = desktop_settings::load();
+    settings.close_action = action;
+    desktop_settings::save(&settings)
+}
+
+fn hide_main(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+}
+
+fn open_close_prompt(app: &AppHandle) -> Result<(), String> {
+    let main = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window is missing".to_string())?;
+    main.eval("window.__DSH_CLOSE_PROMPT__?.show()")
+        .map_err(|e| e.to_string())?;
+    let _ = main.set_focus();
+    Ok(())
+}
+
+fn hide_close_prompt(app: &AppHandle) {
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.eval("window.__DSH_CLOSE_PROMPT__?.hide()");
     }
 }

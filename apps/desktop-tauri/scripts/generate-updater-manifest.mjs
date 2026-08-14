@@ -17,8 +17,11 @@ const OPTIONS = {
   '--repository': 'repository',
   '--release-tag': 'releaseTag',
   '--notes': 'notes',
+  '--notes-file': 'notesFile',
   '--pub-date': 'pubDate',
 }
+
+const REQUIRED = ['assetsDir', 'outputPath', 'version', 'repository', 'releaseTag', 'pubDate']
 
 /** @param {string} version @returns {Record<string, string>} */
 export function normalizedAssets(version) {
@@ -68,7 +71,7 @@ export function createManifest(options) {
 
 /**
  * @param {string[]} args
- * @returns {{ assetsDir: string, outputPath: string, version: string, repository: string, releaseTag: string, notes: string, pubDate: string }}
+ * @returns {{ assetsDir: string, outputPath: string, version: string, repository: string, releaseTag: string, notes?: string, notesFile?: string, pubDate: string }}
  */
 export function parseArguments(args) {
   const values = {}
@@ -80,17 +83,38 @@ export function parseArguments(args) {
     if (value === undefined) throw new Error(`Missing value for option: ${option}`)
     values[key] = value
   }
-  for (const [option, key] of Object.entries(OPTIONS)) {
-    if (values[key] === undefined) throw new Error(`Missing required option: ${option}`)
+  for (const key of REQUIRED) {
+    if (values[key] === undefined) {
+      const option = Object.entries(OPTIONS).find(([, name]) => name === key)?.[0]
+      throw new Error(`Missing required option: ${option}`)
+    }
+  }
+  if (values.notes !== undefined && values.notesFile !== undefined) {
+    throw new Error('Use either --notes or --notes-file, not both')
+  }
+  if (values.notes === undefined && values.notesFile === undefined) {
+    throw new Error('Missing required option: --notes or --notes-file')
   }
   return values
 }
 
 /**
- * @param {{ assetsDir: string, outputPath: string, version: string, repository: string, releaseTag: string, notes: string, pubDate: string }} options
+ * @param {{ notes?: string, notesFile?: string }} options
+ * @returns {Promise<string>}
+ */
+export async function resolveNotes(options) {
+  if (options.notesFile !== undefined) {
+    return (await readFile(options.notesFile, 'utf8')).replace(/\r\n/g, '\n')
+  }
+  return options.notes ?? ''
+}
+
+/**
+ * @param {{ assetsDir: string, outputPath: string, version: string, repository: string, releaseTag: string, notes?: string, notesFile?: string, pubDate: string }} options
  * @returns {Promise<void>}
  */
 export async function writeUpdaterManifest(options) {
+  const notes = await resolveNotes(options)
   const assets = normalizedAssets(options.version)
   const signatures = {}
   for (const [platform, asset] of Object.entries(assets)) {
@@ -107,7 +131,7 @@ export async function writeUpdaterManifest(options) {
     signatures[platform] = await readFile(signaturePath, 'utf8')
   }
 
-  const manifest = createManifest({ ...options, signatures })
+  const manifest = createManifest({ ...options, notes, signatures })
   await mkdir(dirname(resolve(options.outputPath)), { recursive: true })
   await writeFile(options.outputPath, `${JSON.stringify(manifest, null, 2)}\n`)
 }

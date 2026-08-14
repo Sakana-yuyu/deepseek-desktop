@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 use super::config::{
     DEFAULT_NODE_VERSION, MIN_NODE_MINOR_FOR_22, MIN_UNRESTRICTED_NODE_MAJOR,
 };
-use super::env_path::which_on_host;
+use super::env_path::{is_direct_spawnable_cli, which_on_host};
 use super::process::hide_console;
 
 /// Host toolchain selected for provisioning and Host startup.
@@ -55,9 +55,9 @@ pub fn node_binary_compatible(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// True when `path` is an executable pnpm that prints a version.
+/// True when `path` is a spawnable pnpm that prints a version.
 pub fn pnpm_binary_usable(path: &Path) -> bool {
-    tool_version(path).is_some()
+    is_direct_spawnable_cli(path) && tool_version(path).is_some()
 }
 
 /// Scan PATH and well-known install locations after checking a preferred runtime.
@@ -222,8 +222,14 @@ fn dedup_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{node_version_compatible, parse_semver, toolchain_status, HostToolchain};
+    use super::{node_version_compatible, parse_semver, pnpm_binary_usable, toolchain_status, HostToolchain};
     use std::path::PathBuf;
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_a_powershell_pnpm_shim_as_unusable() {
+        assert!(!pnpm_binary_usable(PathBuf::from(r"C:\Users\me\AppData\Roaming\npm\pnpm.ps1").as_path()));
+    }
 
     #[test]
     fn accepts_engine_range_and_rejects_older_node() {

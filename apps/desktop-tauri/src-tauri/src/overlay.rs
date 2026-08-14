@@ -25,23 +25,28 @@ pub fn install_overlay(
     }
 
     let dest_dir = paths.dsh_home.join("desktop-overlay");
-    fs::create_dir_all(&dest_dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dest_dir)
+        .map_err(|e| format!("无法创建 {}: {e}", dest_dir.display()))?;
     let plugin_dest = dest_dir.join("index.mjs");
-    fs::copy(&plugin_src, &plugin_dest).map_err(|e| e.to_string())?;
+    fs::copy(&plugin_src, &plugin_dest)
+        .map_err(|e| format!("无法复制 {} -> {}: {e}", plugin_src.display(), plugin_dest.display()))?;
 
     let plugin_path = normalize_plugin_path(&plugin_dest)?;
     let patch_file = dest_dir.join("cordis.yml");
     let yaml = format!(
         "- insert:\n    - id: dsh-desktop-notify\n      name: '{plugin_path}'\n"
     );
-    fs::write(&patch_file, yaml).map_err(|e| e.to_string())?;
+    fs::write(&patch_file, yaml)
+        .map_err(|e| format!("无法写入 {}: {e}", patch_file.display()))?;
 
     let _ = notify_url;
     Ok(OverlayPatch { patch_file })
 }
 
 fn normalize_plugin_path(path: &Path) -> Result<String, String> {
-    let canonical = path.canonicalize().map_err(|e| e.to_string())?;
+    let canonical = path
+        .canonicalize()
+        .map_err(|e| format!("无法解析 {}: {e}", path.display()))?;
     url::Url::from_file_path(&canonical)
         .map(|file_url| file_url.as_str().to_string())
         .map_err(|()| {

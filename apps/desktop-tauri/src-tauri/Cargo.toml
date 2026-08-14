@@ -1,6 +1,6 @@
 [package]
 name = "dsh-desktop"
-version = "0.1.0-rc.5-0.3"
+version = "0.1.0-rc.5-0.4"
 description = "DeepSeek Harness desktop shell (Tauri)"
 authors = ["DeepSeek"]
 edition = "2021"
@@ -30,6 +30,14 @@ flate2 = "1"
 tar = "0.4"
 tauri-plugin-updater = "2"
 url = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_UI_WindowsAndMessaging",
+] }
+winreg = "0.55"
 
 [profile.release]
 strip = true
