@@ -1,7 +1,12 @@
 //! WSL process runner seam and distro list parse/select.
 
 pub mod distro;
+mod launch;
 mod path;
+
+// Re-exported for later WSL host tasks (spawn/provision).
+#[allow(unused_imports)] // consumed by later spawn/provision tasks
+pub use launch::{build_wsl_web_command, WslCommand, WslLaunchSpec};
 
 // Re-exported for later WSL host tasks (provision/spawn).
 #[allow(unused_imports)] // consumed by later spawn/provision tasks
