@@ -9,6 +9,7 @@ mod process;
 pub mod provision;
 pub mod supervisor;
 pub mod user_home;
+pub mod wsl;
 
 use std::path::PathBuf;
 use std::sync::Arc;
