@@ -1,6 +1,11 @@
 //! WSL process runner seam and distro list parse/select.
 
 pub mod distro;
+mod path;
+
+// Re-exported for later WSL host tasks (provision/spawn).
+#[allow(unused_imports)] // consumed by later spawn/provision tasks
+pub use path::windows_to_wsl_mount;
 
 // Re-exported for later WSL host tasks (`crate::runtime::wsl::select_distro`).
 #[allow(unused_imports)] // consumed by later spawn/provision tasks
