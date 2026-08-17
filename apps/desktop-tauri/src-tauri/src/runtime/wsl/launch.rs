@@ -92,29 +92,64 @@ mod tests {
     }
 
     #[test]
-    fn argv_uses_linux_node_and_patch() {
-        let cmd = build_wsl_web_command(&spec()).unwrap();
+    fn argv_matches_required_sequence() {
+        let s = spec();
+        let cmd = build_wsl_web_command(&s).unwrap();
         assert_eq!(cmd.program, "wsl.exe");
-        assert!(cmd.args.windows(2).any(|w| w == ["-d", "Ubuntu"]));
-        assert!(cmd.args.contains(&"--exec".into()));
-        assert!(cmd.args.iter().any(|a| a.ends_with("/bin/node")));
-        assert!(!cmd
-            .args
-            .iter()
-            .any(|a| a.to_ascii_lowercase().ends_with("node.exe")));
-        assert!(cmd.args.windows(2).any(|w| {
-            w == [
-                "--patch",
-                "/home/u/.dsh/desktop-overlay/cordis.yml"
-            ]
-        }));
+        let expected: Vec<String> = vec![
+            "-d".to_string(),
+            "Ubuntu".to_string(),
+            "--cd".to_string(),
+            "/home/u/.local/share/dsh-desktop/harness-versions/abc".to_string(),
+            "--exec".to_string(),
+            "/usr/bin/env".to_string(),
+            "PATH=/home/u/.local/share/dsh-desktop/runtime/node/bin:/usr/bin".to_string(),
+            "DSH_HOME=/home/u/.dsh".to_string(),
+            "NODE_ENV=production".to_string(),
+            "DSH_DESKTOP_NOTIFY_URL=http://127.0.0.1:17991/".to_string(),
+            "/home/u/.local/share/dsh-desktop/runtime/node/bin/node".to_string(),
+            "/home/u/.local/share/dsh-desktop/harness-versions/abc/apps/cli/lib/bin.js"
+                .to_string(),
+            "web".to_string(),
+            "--patch".to_string(),
+            "/home/u/.dsh/desktop-overlay/cordis.yml".to_string(),
+            "--host".to_string(),
+            "127.0.0.1".to_string(),
+            "--port".to_string(),
+            "17890".to_string(),
+        ];
+        assert_eq!(cmd.args, expected);
     }
 
     #[test]
-    fn rejects_windows_node_exe() {
+    fn rejects_linux_node_with_backslash() {
+        let mut s = spec();
+        s.linux_node = "/home/u\\runtime/node/bin/node".into();
+        let err = build_wsl_web_command(&s).unwrap_err();
+        assert_eq!(err, "禁止在 WSL 中执行 Windows node.exe");
+    }
+
+    #[test]
+    fn rejects_lowercase_node_exe_suffix() {
+        let mut s = spec();
+        s.linux_node = "/mnt/c/Program Files/nodejs/node.exe".into();
+        let err = build_wsl_web_command(&s).unwrap_err();
+        assert_eq!(err, "禁止在 WSL 中执行 Windows node.exe");
+    }
+
+    #[test]
+    fn rejects_uppercase_node_exe_suffix() {
+        let mut s = spec();
+        s.linux_node = "/mnt/c/Program Files/nodejs/NODE.EXE".into();
+        let err = build_wsl_web_command(&s).unwrap_err();
+        assert_eq!(err, "禁止在 WSL 中执行 Windows node.exe");
+    }
+
+    #[test]
+    fn rejects_windows_node_exe_path() {
         let mut s = spec();
         s.linux_node = r"C:\Program Files\nodejs\node.exe".into();
         let err = build_wsl_web_command(&s).unwrap_err();
-        assert!(err.contains("node.exe"));
+        assert_eq!(err, "禁止在 WSL 中执行 Windows node.exe");
     }
 }
