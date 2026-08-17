@@ -15,12 +15,25 @@ pub enum CloseAction {
     Exit,
 }
 
+/// Where the desktop shell runs the agent runtime.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentEnvironment {
+    #[default]
+    Windows,
+    Wsl,
+}
+
 /// Desktop preferences stored as JSON under the application-data root.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopSettings {
     #[serde(default)]
     pub close_action: Option<CloseAction>,
+    #[serde(default)]
+    pub agent_environment: AgentEnvironment,
+    #[serde(default)]
+    pub wsl_distro: Option<String>,
 }
 
 /// Path of `desktop-settings.json` beside `boot.log`.
@@ -58,9 +71,14 @@ pub fn save_to(path: &Path, settings: &DesktopSettings) -> Result<(), String> {
     fs::write(path, format!("{raw}\n")).map_err(|e| format!("无法写入 {}: {e}", path.display()))
 }
 
+/// Resolved agent runtime target from persisted settings.
+pub fn effective_agent_environment(settings: &DesktopSettings) -> AgentEnvironment {
+    settings.agent_environment
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{load_from, save_to, CloseAction, DesktopSettings};
+    use super::{load_from, save_to, AgentEnvironment, CloseAction, DesktopSettings};
     use std::fs;
     use std::path::PathBuf;
 
@@ -85,12 +103,45 @@ mod tests {
     }
 
     #[test]
+    fn omitted_agent_environment_is_windows() {
+        let path = temp_file();
+        let _ = fs::remove_file(&path);
+        assert_eq!(
+            load_from(&path).agent_environment,
+            AgentEnvironment::Windows
+        );
+        assert_eq!(load_from(&path).wsl_distro, None);
+    }
+
+    #[test]
+    fn persists_wsl_environment_and_distro() {
+        let path = temp_file();
+        save_to(
+            &path,
+            &DesktopSettings {
+                close_action: None,
+                agent_environment: AgentEnvironment::Wsl,
+                wsl_distro: Some("Ubuntu".into()),
+            },
+        )
+        .unwrap();
+        let loaded = load_from(&path);
+        assert_eq!(loaded.agent_environment, AgentEnvironment::Wsl);
+        assert_eq!(loaded.wsl_distro.as_deref(), Some("Ubuntu"));
+        let raw = fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("agentEnvironment"));
+        assert!(raw.contains("wsl"));
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
     fn persists_minimize_and_exit_close_actions() {
         let path = temp_file();
         save_to(
             &path,
             &DesktopSettings {
                 close_action: Some(CloseAction::Minimize),
+                ..DesktopSettings::default()
             },
         )
         .unwrap();
@@ -99,6 +150,7 @@ mod tests {
             &path,
             &DesktopSettings {
                 close_action: Some(CloseAction::Exit),
+                ..DesktopSettings::default()
             },
         )
         .unwrap();
@@ -109,6 +161,7 @@ mod tests {
             &path,
             &DesktopSettings {
                 close_action: None,
+                ..DesktopSettings::default()
             },
         )
         .unwrap();
