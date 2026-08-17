@@ -8,12 +8,17 @@ mod tray;
 mod updater;
 mod window_layout;
 
+use desktop_settings::AgentEnvironment;
 use runtime::boot_log;
 use runtime::config::BUNDLED_HARNESS_DIR;
 use runtime::io_fallback::is_recoverable_io;
-use runtime::provision::{ensure_runtime, try_recover_paths};
-use runtime::supervisor::HostOverlay;
-use runtime::{DesktopRuntime, ProvisionEvent};
+use runtime::provision::{ensure_runtime, read_bundle_hash, try_recover_paths};
+use runtime::supervisor::{spawn_wsl_web_host, HostOverlay};
+use runtime::user_home::resolve_user_home;
+use runtime::wsl::{
+    ensure_wsl_runtime, parse_wsl_list, select_distro, SystemWslRunner, WslRunner, WslSelectError,
+};
+use runtime::{app_data_root, boot_kind, DesktopRuntime, ProvisionEvent};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::window::Color;
@@ -115,6 +120,53 @@ async fn boot_app(app: AppHandle, bundled: Option<PathBuf>) -> Result<(), String
             None
         }
     };
+
+    let settings = desktop_settings::load();
+    let runtime = match boot_kind(&settings) {
+        AgentEnvironment::Windows => {
+            boot_windows_runtime(app.clone(), bundled, notify.as_ref(), Arc::clone(&progress)).await?
+        }
+        AgentEnvironment::Wsl => {
+            boot_wsl_runtime(app.clone(), bundled, &settings, notify.as_ref(), Arc::clone(&progress))
+                .await?
+        }
+    };
+
+    let web_url = runtime.web_url.clone();
+    if !runtime.host.disabled_plugins.is_empty() {
+        let names = runtime.host.disabled_plugins.join("、");
+        boot_log::error(&format!("plugins disabled by rescue patch: {names}"));
+        notify::toast(
+            &app,
+            "DeepSeek Harness",
+            &format!("以下插件已损坏，本次启动已自动禁用：{names}。修复或更新插件后重启即可恢复。"),
+        );
+    }
+    app.manage(runtime);
+    if let Some(notify) = notify {
+        app.manage(notify);
+    }
+    boot_log::info(&format!("opening main window url={web_url}"));
+    chrome::open_main_window(&app, &web_url)?;
+    if let Some(splash) = app.get_webview_window("splash") {
+        let _ = splash.close();
+    }
+    boot_log::info("boot complete");
+    let app_for_update = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = updater::install_available(&app_for_update, Arc::new(|_| {})).await {
+            boot_log::info(&format!("desktop update skipped: {error}"));
+        }
+    });
+    Ok(())
+}
+
+async fn boot_windows_runtime(
+    app: AppHandle,
+    bundled: Option<PathBuf>,
+    notify: Option<&notify::NotifyHandle>,
+    progress: Arc<dyn Fn(ProvisionEvent) + Send + Sync>,
+) -> Result<DesktopRuntime, String> {
     let paths = match ensure_runtime(bundled.clone(), {
         let progress = Arc::clone(&progress);
         move |event| progress(event)
@@ -144,7 +196,7 @@ async fn boot_app(app: AppHandle, bundled: Option<PathBuf>) -> Result<(), String
     };
 
     let overlay_src = overlay::resolve_overlay_source(app.path().resource_dir().ok().as_deref());
-    let host_overlay = notify.as_ref().and_then(|notify| {
+    let host_overlay = notify.and_then(|notify| {
         match overlay::install_overlay(&paths, &overlay_src, &notify.url) {
             Ok(implanted) => Some(HostOverlay {
                 patch_file: implanted.patch_file,
@@ -157,34 +209,61 @@ async fn boot_app(app: AppHandle, bundled: Option<PathBuf>) -> Result<(), String
         }
     });
 
-    let runtime = DesktopRuntime::start(paths, host_overlay.as_ref(), progress).await?;
-    let web_url = runtime.web_url.clone();
-    if !runtime.host.disabled_plugins.is_empty() {
-        let names = runtime.host.disabled_plugins.join("、");
-        boot_log::error(&format!("plugins disabled by rescue patch: {names}"));
-        notify::toast(
-            &app,
-            "DeepSeek Harness",
-            &format!("以下插件已损坏，本次启动已自动禁用：{names}。修复或更新插件后重启即可恢复。"),
-        );
-    }
-    app.manage(runtime);
-    if let Some(notify) = notify {
-        app.manage(notify);
-    }
-    boot_log::info(&format!("opening main window url={web_url}"));
-    chrome::open_main_window(&app, &web_url)?;
-    if let Some(splash) = app.get_webview_window("splash") {
-        let _ = splash.close();
-    }
-    boot_log::info("boot complete");
-    let app_for_update = app.clone();
-    tauri::async_runtime::spawn(async move {
-        if let Err(error) = updater::install_available(&app_for_update, Arc::new(|_| {})).await {
-            boot_log::info(&format!("desktop update skipped: {error}"));
-        }
+    DesktopRuntime::start(paths, host_overlay.as_ref(), progress).await
+}
+
+async fn boot_wsl_runtime(
+    app: AppHandle,
+    bundled: Option<PathBuf>,
+    settings: &desktop_settings::DesktopSettings,
+    notify: Option<&notify::NotifyHandle>,
+    progress: Arc<dyn Fn(ProvisionEvent) + Send + Sync>,
+) -> Result<DesktopRuntime, String> {
+    progress(ProvisionEvent::Status("正在检测 WSL…".into()));
+    let runner = SystemWslRunner;
+    let list_out = runner
+        .run(&["-l", "-v"])
+        .map_err(|_| WslSelectError::missing_wsl().splash_message().to_string())?;
+    let list_text = String::from_utf8_lossy(&list_out.stdout);
+    let distros = parse_wsl_list(&list_text);
+    let distro = select_distro(&distros, settings.wsl_distro.as_deref())
+        .map_err(|error| error.splash_message().to_string())?;
+
+    let bundled = bundled.ok_or_else(|| {
+        "安装包内缺少 harness 源码资源；请重新构建 desktop-tauri".to_string()
+    })?;
+    let bundle_hash = read_bundle_hash(&bundled)?;
+    let isolated_home = app_data_root()?.join("dsh-home");
+    let windows_dsh_home = resolve_user_home(&isolated_home).path;
+    let overlay_src = overlay::resolve_overlay_source(app.path().resource_dir().ok().as_deref());
+    let overlay_for_provision = notify.map(|_| overlay_src.as_path());
+    let notify_url = notify.map(|server| server.url.as_str());
+
+    let wsl_paths = ensure_wsl_runtime(
+        &runner,
+        &distro.name,
+        &bundled,
+        &bundle_hash,
+        &windows_dsh_home,
+        overlay_for_provision,
+        notify_url,
+        {
+            let progress = Arc::clone(&progress);
+            move |event| progress(event)
+        },
+    )
+    .await?;
+
+    let host_overlay = notify.map(|server| HostOverlay {
+        // Linux patch path is already on `wsl_paths.linux_patch`; Windows
+        // `patch_file` is unused by `spawn_wsl_web_host`.
+        patch_file: PathBuf::new(),
+        notify_url: server.url.clone(),
     });
-    Ok(())
+
+    progress(ProvisionEvent::Status("正在启动 Web 界面…".into()));
+    let host = spawn_wsl_web_host(&wsl_paths, host_overlay.as_ref(), &runner).await?;
+    Ok(DesktopRuntime::start_wsl(host))
 }
 
 fn splash_eval(app: &AppHandle, script: &str) -> Result<(), String> {

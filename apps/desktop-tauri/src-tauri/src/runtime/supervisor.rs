@@ -198,7 +198,6 @@ pub async fn spawn_web_host(
 ///
 /// `runner` is reserved for callers that already hold a `WslRunner`; the long-lived
 /// Host is spawned via `wsl.exe` directly so stdout/stderr stay piped.
-#[allow(dead_code)] // wired by Task 8 boot branch
 pub async fn spawn_wsl_web_host(
     paths: &WslRuntimePaths,
     overlay: Option<&HostOverlay>,
@@ -383,7 +382,6 @@ fn reap_wsl_session_and_stub(session: &WslSession, child: &Arc<Mutex<Option<Chil
     let _ = std::fs::remove_file(host_pid_path());
 }
 
-#[allow(dead_code)] // used by spawn_wsl_web_host (Task 8)
 fn spawn_wsl_child(command: &super::wsl::WslCommand) -> Result<Child, String> {
     let mut cmd = Command::new(&command.program);
     cmd.args(&command.args)
@@ -396,7 +394,6 @@ fn spawn_wsl_child(command: &super::wsl::WslCommand) -> Result<Child, String> {
 
 /// Read stderr until the first parseable pid line, within [`WSL_PID_HANDSHAKE_TIMEOUT`].
 /// Remaining lines keep draining into `stderr_lines` for later failure messages.
-#[allow(dead_code)] // used by spawn_wsl_web_host (Task 8)
 async fn take_linux_pid_and_drain_stderr(
     child: &mut Child,
     stderr_lines: &Arc<Mutex<Vec<String>>>,

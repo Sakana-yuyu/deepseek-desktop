@@ -423,7 +423,7 @@ fn find_existing_harness(app_root: &Path) -> Option<PathBuf> {
         .then_some(legacy)
 }
 
-fn read_bundle_hash(bundled: &Path) -> Result<String, String> {
+pub(crate) fn read_bundle_hash(bundled: &Path) -> Result<String, String> {
     let manifest = bundled.join(".bundle-manifest.json");
     let raw = fs::read_to_string(&manifest).map_err(|e| e.to_string())?;
     let parsed: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;

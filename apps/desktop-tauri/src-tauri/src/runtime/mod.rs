@@ -14,6 +14,9 @@ pub mod wsl;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::desktop_settings::{
+    effective_agent_environment, AgentEnvironment, DesktopSettings,
+};
 use provision::RuntimePaths;
 use supervisor::{HostHandle, HostOverlay};
 
@@ -25,7 +28,10 @@ pub struct DesktopRuntime {
 }
 
 impl DesktopRuntime {
-    /// Start `dsh web` against an already provisioned tree.
+    /// Start `dsh web` against an already provisioned Windows tree.
+    ///
+    /// Applies the Windows PATH bridge and profile repair, then spawns the
+    /// Host with `node.exe`. WSL mode must use [`Self::start_wsl`] instead.
     pub async fn start(
         paths: RuntimePaths,
         overlay: Option<&HostOverlay>,
@@ -58,6 +64,28 @@ impl DesktopRuntime {
             host,
         })
     }
+
+    /// Wrap a Host already spawned inside WSL.
+    ///
+    /// Skips the Windows PATH bridge and Windows profile repair. `paths` is a
+    /// documented placeholder: the live Linux tree lives on WSL runtime paths
+    /// inside the supervisor session, not on Windows `RuntimePaths`.
+    pub fn start_wsl(host: HostHandle) -> Self {
+        boot_log::info(&format!("wsl dsh web ready url={}", host.web_url));
+        Self {
+            // Placeholder only — WSL Host does not consume Windows RuntimePaths.
+            paths: RuntimePaths {
+                node_binary: PathBuf::new(),
+                pnpm_binary: PathBuf::new(),
+                cli_entry: PathBuf::new(),
+                harness_root: PathBuf::new(),
+                runtime_root: PathBuf::new(),
+                dsh_home: PathBuf::new(),
+            },
+            web_url: host.web_url.clone(),
+            host,
+        }
+    }
 }
 
 /// Progress events for the splash UI.
@@ -67,8 +95,35 @@ pub enum ProvisionEvent {
     Progress(u8),
 }
 
+/// Which agent environment boot should enter, from persisted settings.
+pub fn boot_kind(settings: &DesktopSettings) -> AgentEnvironment {
+    effective_agent_environment(settings)
+}
+
 pub fn app_data_root() -> Result<PathBuf, String> {
     dirs::data_dir()
         .map(|d| d.join("DeepSeek Harness"))
         .ok_or_else(|| "cannot resolve application data directory".into())
+}
+
+#[cfg(test)]
+mod boot_kind_tests {
+    use super::boot_kind;
+    use crate::desktop_settings::{AgentEnvironment, DesktopSettings};
+
+    #[test]
+    fn default_settings_select_windows() {
+        assert_eq!(boot_kind(&DesktopSettings::default()), AgentEnvironment::Windows);
+    }
+
+    #[test]
+    fn wsl_settings_select_wsl() {
+        assert_eq!(
+            boot_kind(&DesktopSettings {
+                agent_environment: AgentEnvironment::Wsl,
+                ..DesktopSettings::default()
+            }),
+            AgentEnvironment::Wsl
+        );
+    }
 }
