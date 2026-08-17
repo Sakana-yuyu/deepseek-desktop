@@ -190,6 +190,17 @@ pub fn apply_agent_environment(value: AgentEnvironment) -> Result<(), String> {
     desktop_settings::save(&settings)
 }
 
+/// Persist the agent runtime target from the tray and toast success or failure.
+pub fn remember_agent_environment(app: &AppHandle, value: AgentEnvironment) {
+    match apply_agent_environment(value) {
+        Ok(()) => notify::toast(app, "DeepSeek Harness", environment_changed_message()),
+        Err(error) => {
+            boot_log::error(&format!("tray agent environment save failed: {error}"));
+            notify::toast(app, "保存运行环境失败", &error);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::environment_changed_message;

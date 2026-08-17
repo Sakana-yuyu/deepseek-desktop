@@ -84,22 +84,10 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
                 let _ = chrome::remember_close_action(app, None);
             }
             "env-windows" => {
-                if chrome::apply_agent_environment(AgentEnvironment::Windows).is_ok() {
-                    notify::toast(
-                        app,
-                        "DeepSeek Harness",
-                        chrome::environment_changed_message(),
-                    );
-                }
+                chrome::remember_agent_environment(app, AgentEnvironment::Windows);
             }
             "env-wsl" => {
-                if chrome::apply_agent_environment(AgentEnvironment::Wsl).is_ok() {
-                    notify::toast(
-                        app,
-                        "DeepSeek Harness",
-                        chrome::environment_changed_message(),
-                    );
-                }
+                chrome::remember_agent_environment(app, AgentEnvironment::Wsl);
             }
             "update" => {
                 let app = app.clone();
