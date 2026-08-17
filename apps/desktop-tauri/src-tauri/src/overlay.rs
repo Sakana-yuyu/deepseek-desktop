@@ -10,6 +10,21 @@ pub struct OverlayPatch {
     pub patch_file: PathBuf,
 }
 
+/// Build a POSIX `file://` URL for a Linux overlay plugin path.
+pub fn linux_plugin_file_url(linux_path: &str) -> Result<String, String> {
+    if !linux_path.starts_with('/') {
+        return Err(format!(
+            "Linux plugin path must be absolute: {linux_path}"
+        ));
+    }
+    Ok(format!("file://{linux_path}"))
+}
+
+/// Render the `--patch` YAML row that registers the desktop notify plugin.
+pub fn overlay_yaml(plugin_url: &str) -> String {
+    format!("- insert:\n    - id: dsh-desktop-notify\n      name: '{plugin_url}'\n")
+}
+
 /// Copy the overlay plugin into the selected home and write a `--patch` list.
 pub fn install_overlay(
     paths: &RuntimePaths,
@@ -33,9 +48,7 @@ pub fn install_overlay(
 
     let plugin_path = normalize_plugin_path(&plugin_dest)?;
     let patch_file = dest_dir.join("cordis.yml");
-    let yaml = format!(
-        "- insert:\n    - id: dsh-desktop-notify\n      name: '{plugin_path}'\n"
-    );
+    let yaml = overlay_yaml(&plugin_path);
     fs::write(&patch_file, yaml)
         .map_err(|e| format!("无法写入 {}: {e}", patch_file.display()))?;
 
@@ -74,9 +87,24 @@ pub fn resolve_overlay_source(resource_dir: Option<&Path>) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{install_overlay, normalize_plugin_path};
+    use super::{install_overlay, linux_plugin_file_url, normalize_plugin_path, overlay_yaml};
     use crate::runtime::provision::RuntimePaths;
     use std::fs;
+
+    #[test]
+    fn linux_file_url_is_posix() {
+        assert_eq!(
+            linux_plugin_file_url("/home/u/.dsh/desktop-overlay/index.mjs").unwrap(),
+            "file:///home/u/.dsh/desktop-overlay/index.mjs"
+        );
+    }
+
+    #[test]
+    fn overlay_yaml_names_linux_url() {
+        let yaml = overlay_yaml("file:///home/u/.dsh/desktop-overlay/index.mjs");
+        assert!(yaml.contains("file:///home/u/.dsh/desktop-overlay/index.mjs"));
+        assert!(!yaml.contains("file:///C:"));
+    }
 
     #[test]
     fn writes_a_file_url_patch_row_that_node_esm_can_import() {
