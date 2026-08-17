@@ -7,7 +7,7 @@ use tauri::{AppHandle, Manager, Theme, WebviewUrl, WebviewWindowBuilder, WindowE
 
 const DSH_BG: Color = Color(21, 21, 23, 255);
 
-use crate::desktop_settings::{self, CloseAction};
+use crate::desktop_settings::{self, AgentEnvironment, CloseAction};
 use crate::notify;
 use crate::runtime::boot_log;
 use crate::runtime::DesktopRuntime;
@@ -175,5 +175,27 @@ fn open_close_prompt(app: &AppHandle) -> Result<(), String> {
 fn hide_close_prompt(app: &AppHandle) {
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.eval("window.__DSH_CLOSE_PROMPT__?.hide()");
+    }
+}
+
+/// Toast copy when the tray changes the agent runtime target.
+pub fn environment_changed_message() -> &'static str {
+    "运行环境将在重启后生效"
+}
+
+/// Persist the agent runtime target from the tray without restarting the Host.
+pub fn apply_agent_environment(value: AgentEnvironment) -> Result<(), String> {
+    let mut settings = desktop_settings::load();
+    settings.agent_environment = value;
+    desktop_settings::save(&settings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::environment_changed_message;
+
+    #[test]
+    fn environment_changed_message_is_restart_toast() {
+        assert_eq!(environment_changed_message(), "运行环境将在重启后生效");
     }
 }

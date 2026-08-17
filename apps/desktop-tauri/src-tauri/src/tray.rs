@@ -5,7 +5,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::AppHandle;
 
 use crate::chrome;
-use crate::desktop_settings::CloseAction;
+use crate::desktop_settings::{AgentEnvironment, CloseAction};
 use crate::notify;
 use crate::runtime::boot_log;
 use crate::updater;
@@ -28,13 +28,38 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
     let close_ask =
         MenuItem::with_id(app, "close-ask", "下次关闭时再询问", true, None::<&str>)
             .map_err(|e| e.to_string())?;
+    let env_windows = MenuItem::with_id(
+        app,
+        "env-windows",
+        "运行环境：Windows",
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
+    let env_wsl = MenuItem::with_id(
+        app,
+        "env-wsl",
+        "运行环境：WSL（需重启）",
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
     let update = MenuItem::with_id(app, "update", "检查更新", true, None::<&str>)
         .map_err(|e| e.to_string())?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)
         .map_err(|e| e.to_string())?;
     let menu = Menu::with_items(
         app,
-        &[&show, &close_min, &close_exit, &close_ask, &update, &quit],
+        &[
+            &show,
+            &close_min,
+            &close_exit,
+            &close_ask,
+            &env_windows,
+            &env_wsl,
+            &update,
+            &quit,
+        ],
     )
     .map_err(|e| e.to_string())?;
 
@@ -57,6 +82,24 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
             }
             "close-ask" => {
                 let _ = chrome::remember_close_action(app, None);
+            }
+            "env-windows" => {
+                if chrome::apply_agent_environment(AgentEnvironment::Windows).is_ok() {
+                    notify::toast(
+                        app,
+                        "DeepSeek Harness",
+                        chrome::environment_changed_message(),
+                    );
+                }
+            }
+            "env-wsl" => {
+                if chrome::apply_agent_environment(AgentEnvironment::Wsl).is_ok() {
+                    notify::toast(
+                        app,
+                        "DeepSeek Harness",
+                        chrome::environment_changed_message(),
+                    );
+                }
             }
             "update" => {
                 let app = app.clone();
