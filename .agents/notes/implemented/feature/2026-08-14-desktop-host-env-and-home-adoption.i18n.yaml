@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-14-desktop-host-env-and-home-adoption.md
-2026-08-14-desktop-host-env-and-home-adoption.md: d6d6e41039cc5a1ebc26d8dfb0fad3e23de993c8
-2026-08-14-desktop-host-env-and-home-adoption.zh.md: 8da17d62f9c69d0101f2b6ffcaca0151963ce601
+2026-08-14-desktop-host-env-and-home-adoption.md: 5fa3f759729b9e53bda3ebb352ef5758a0373cb4
+2026-08-14-desktop-host-env-and-home-adoption.zh.md: 1cead612a82540fc1229f4abb854d6c064fad8b9

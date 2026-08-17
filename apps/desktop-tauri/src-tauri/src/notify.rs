@@ -9,6 +9,7 @@ use serde::Deserialize;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_notification::NotificationExt;
 
+use crate::i18n::{self, Msg};
 use crate::runtime::boot_log;
 
 #[derive(Clone)]
@@ -77,13 +78,12 @@ fn handle_client(app: AppHandle, mut stream: TcpStream, sound: Option<&std::path
     }
 
     let body = request.split("\r\n\r\n").nth(1).unwrap_or("");
-    let payload: NotifyPayload = serde_json::from_str(body.trim_end_matches('\0')).unwrap_or(
-        NotifyPayload {
+    let payload: NotifyPayload =
+        serde_json::from_str(body.trim_end_matches('\0')).unwrap_or(NotifyPayload {
             title: None,
             body: None,
             session_id: None,
-        },
-    );
+        });
     let _ = stream.write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n");
 
     let focused = app
@@ -94,11 +94,15 @@ fn handle_client(app: AppHandle, mut stream: TcpStream, sound: Option<&std::path
         return;
     }
 
-    let title = payload.title.unwrap_or_else(|| "任务完成".into());
+    let title = payload
+        .title
+        .unwrap_or_else(|| i18n::t(Msg::NotifyTitle).into());
     let body = payload
         .body
-        .or(payload.session_id.map(|id| format!("会话 {id} 已完成")))
-        .unwrap_or_else(|| "DeepSeek Harness 已完成本轮任务".into());
+        .or(payload
+            .session_id
+            .map(|id| i18n::tf(Msg::NotifySessionDone, &id)))
+        .unwrap_or_else(|| i18n::t(Msg::NotifyBody).into());
 
     if let Err(error) = app
         .notification()

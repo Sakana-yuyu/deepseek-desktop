@@ -16,9 +16,7 @@ pub struct OverlayPatch {
 /// Windows drive path (for example `/C:/plugin.mjs`), or contains `wsl.localhost`.
 pub fn linux_plugin_file_url(linux_path: &str) -> Result<String, String> {
     if !linux_path.starts_with('/') {
-        return Err(format!(
-            "Linux plugin path must be absolute: {linux_path}"
-        ));
+        return Err(format!("Linux plugin path must be absolute: {linux_path}"));
     }
     if linux_path.contains("wsl.localhost") {
         return Err(format!(
@@ -68,11 +66,15 @@ pub fn install_overlay_at(
         ));
     }
 
-    fs::create_dir_all(dest_dir)
-        .map_err(|e| format!("无法创建 {}: {e}", dest_dir.display()))?;
+    fs::create_dir_all(dest_dir).map_err(|e| format!("无法创建 {}: {e}", dest_dir.display()))?;
     let plugin_dest = dest_dir.join("index.mjs");
-    fs::copy(&plugin_src, &plugin_dest)
-        .map_err(|e| format!("无法复制 {} -> {}: {e}", plugin_src.display(), plugin_dest.display()))?;
+    fs::copy(&plugin_src, &plugin_dest).map_err(|e| {
+        format!(
+            "无法复制 {} -> {}: {e}",
+            plugin_src.display(),
+            plugin_dest.display()
+        )
+    })?;
 
     let patch_file = dest_dir.join("cordis.yml");
     fs::write(&patch_file, overlay_yaml(plugin_name_in_yaml))
@@ -96,11 +98,15 @@ pub fn install_overlay(
         ));
     }
 
-    fs::create_dir_all(&dest_dir)
-        .map_err(|e| format!("无法创建 {}: {e}", dest_dir.display()))?;
+    fs::create_dir_all(&dest_dir).map_err(|e| format!("无法创建 {}: {e}", dest_dir.display()))?;
     let plugin_dest = dest_dir.join("index.mjs");
-    fs::copy(&plugin_src, &plugin_dest)
-        .map_err(|e| format!("无法复制 {} -> {}: {e}", plugin_src.display(), plugin_dest.display()))?;
+    fs::copy(&plugin_src, &plugin_dest).map_err(|e| {
+        format!(
+            "无法复制 {} -> {}: {e}",
+            plugin_src.display(),
+            plugin_dest.display()
+        )
+    })?;
 
     let plugin_path = normalize_plugin_path(&plugin_dest)?;
     let _ = notify_url;
@@ -165,18 +171,19 @@ mod tests {
 
     #[test]
     fn install_overlay_at_writes_yaml_with_given_url() {
-        let root = std::env::temp_dir().join(format!(
-            "dsh desktop overlay at {}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("dsh desktop overlay at {}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("src")).unwrap();
-        fs::write(root.join("src").join("index.mjs"), "export function apply() {}\n").unwrap();
+        fs::write(
+            root.join("src").join("index.mjs"),
+            "export function apply() {}\n",
+        )
+        .unwrap();
 
         let dest_dir = root.join("desktop-overlay");
         let plugin_url = "file:///home/u/.dsh/desktop-overlay/index.mjs";
-        let overlay =
-            install_overlay_at(&dest_dir, &root.join("src"), plugin_url).unwrap();
+        let overlay = install_overlay_at(&dest_dir, &root.join("src"), plugin_url).unwrap();
         let yaml = fs::read_to_string(&overlay.patch_file).unwrap();
 
         assert!(dest_dir.join("index.mjs").is_file());
@@ -194,13 +201,14 @@ mod tests {
 
     #[test]
     fn writes_a_file_url_patch_row_that_node_esm_can_import() {
-        let root = std::env::temp_dir().join(format!(
-            "dsh desktop overlay {}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("dsh desktop overlay {}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("src")).unwrap();
-        fs::write(root.join("src").join("index.mjs"), "export function apply() {}\n").unwrap();
+        fs::write(
+            root.join("src").join("index.mjs"),
+            "export function apply() {}\n",
+        )
+        .unwrap();
 
         let dsh_home = root.join("home");
         let paths = RuntimePaths {
@@ -212,7 +220,8 @@ mod tests {
             dsh_home: dsh_home.clone(),
         };
 
-        let overlay = install_overlay(&paths, &root.join("src"), "http://127.0.0.1:9/notify").unwrap();
+        let overlay =
+            install_overlay(&paths, &root.join("src"), "http://127.0.0.1:9/notify").unwrap();
         let yaml = fs::read_to_string(&overlay.patch_file).unwrap();
         let plugin = dsh_home.join("desktop-overlay").join("index.mjs");
         let plugin_url = normalize_plugin_path(&plugin).unwrap();

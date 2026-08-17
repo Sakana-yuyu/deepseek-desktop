@@ -5,6 +5,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use crate::cli_shim::{DshLaunchSpec, LAUNCH_FILE};
+use crate::i18n::{self, Msg};
 
 use super::boot_log;
 use super::env_path::{discovery_path, path_eq, which_on_host};
@@ -34,9 +35,7 @@ pub fn prepare_host_path(
     paths: &RuntimePaths,
     progress: impl Fn(ProvisionEvent),
 ) -> Result<String, String> {
-    progress(ProvisionEvent::Status(
-        "正在写入 dsh 命令并加入 PATH…".into(),
-    ));
+    progress(ProvisionEvent::Status(i18n::t(Msg::StatusWritePath).into()));
     let bridge = match install_path_bridge(paths) {
         Ok(bridge) => bridge,
         Err(error) => {
@@ -260,7 +259,10 @@ fn pnpm_shim_body(node: &Path, pnpm: &Path) -> String {
 fn find_pnpm_cjs(pnpm: &Path) -> Option<PathBuf> {
     let dir = pnpm.parent()?;
     let candidates = [
-        dir.join("node_modules").join("pnpm").join("bin").join("pnpm.cjs"),
+        dir.join("node_modules")
+            .join("pnpm")
+            .join("bin")
+            .join("pnpm.cjs"),
         dir.join("lib")
             .join("node_modules")
             .join("pnpm")
@@ -283,7 +285,7 @@ fn install_dsh_exe(bin_dir: &Path) -> Result<(), String> {
         return Ok(());
     }
     let dest = bin_dir.join("dsh.exe");
-    if same_exe(&source, &dest) {
+    if same_exe(&source, &dest) || !exe_needs_refresh(&source, &dest) {
         return Ok(());
     }
     match fs::remove_file(&dest) {
@@ -315,6 +317,23 @@ fn same_exe(left: &Path, right: &Path) -> bool {
     }
     match (fs::canonicalize(left), fs::canonicalize(right)) {
         (Ok(a), Ok(b)) => path_eq(&a, &b),
+        _ => false,
+    }
+}
+
+/// True when `dest` is missing, a different size, or older than `source`.
+fn exe_needs_refresh(source: &Path, dest: &Path) -> bool {
+    let Ok(src) = fs::metadata(source) else {
+        return false;
+    };
+    let Ok(dst) = fs::metadata(dest) else {
+        return true;
+    };
+    if src.len() != dst.len() {
+        return true;
+    }
+    match (src.modified(), dst.modified()) {
+        (Ok(src_mtime), Ok(dst_mtime)) => src_mtime > dst_mtime,
         _ => false,
     }
 }
@@ -388,10 +407,7 @@ fn persist_user_path(bridge: &PathBridge) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-fn persist_windows_user_path_if_missing(
-    dir: Option<&Path>,
-    names: &[&str],
-) -> Result<(), String> {
+fn persist_windows_user_path_if_missing(dir: Option<&Path>, names: &[&str]) -> Result<(), String> {
     let Some(dir) = dir else {
         return Ok(());
     };
@@ -581,8 +597,8 @@ fn path_string_contains(path: &str, candidate: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        merge_path, path_string_contains, pnpm_shim_body, quote_for_cmd, tool_exists_in,
-        write_cli_shims,
+        exe_needs_refresh, merge_path, path_string_contains, pnpm_shim_body, quote_for_cmd,
+        tool_exists_in, write_cli_shims,
     };
     use crate::cli_shim::{read_launch_spec, LAUNCH_FILE};
     use std::fs;
@@ -613,7 +629,8 @@ mod tests {
     fn prepends_missing_dirs_without_duplicating_existing_path() {
         let first = PathBuf::from("C:\\DeepSeek Harness\\bin");
         let second = PathBuf::from("C:\\DeepSeek Harness\\runtime\\node");
-        let existing = std::env::join_paths([&second, &PathBuf::from("C:\\Windows\\System32")]).unwrap();
+        let existing =
+            std::env::join_paths([&second, &PathBuf::from("C:\\Windows\\System32")]).unwrap();
         let merged = merge_path(Some(existing), &[first.clone(), second.clone()]);
         let parts: Vec<PathBuf> = std::env::split_paths(&merged).collect();
         assert_eq!(parts[0], first);
@@ -716,6 +733,19 @@ mod tests {
         fs::write(root.join("git.exe"), "").unwrap();
         assert!(tool_exists_in(&root, "git"));
         assert!(!tool_exists_in(&root, "bash"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn skips_exe_refresh_when_dest_matches_size_and_is_not_older() {
+        let root = temp_root();
+        let source = root.join("dsh-desktop.exe");
+        let dest = root.join("dsh.exe");
+        fs::write(&source, b"desktop-binary").unwrap();
+        fs::copy(&source, &dest).unwrap();
+        assert!(!exe_needs_refresh(&source, &dest));
+        fs::write(&dest, b"stale").unwrap();
+        assert!(exe_needs_refresh(&source, &dest));
         let _ = fs::remove_dir_all(&root);
     }
 }

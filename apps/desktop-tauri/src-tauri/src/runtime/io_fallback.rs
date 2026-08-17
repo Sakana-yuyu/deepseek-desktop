@@ -18,7 +18,11 @@ pub fn is_recoverable_io(error: &str) -> bool {
 }
 
 /// Format a recoverable failure that names the path and the operation.
-pub fn recoverable_message(operation: &str, path: &std::path::Path, error: impl std::fmt::Display) -> String {
+pub fn recoverable_message(
+    operation: &str,
+    path: &std::path::Path,
+    error: impl std::fmt::Display,
+) -> String {
     format!("{operation} {}: {error}", path.display())
 }
 

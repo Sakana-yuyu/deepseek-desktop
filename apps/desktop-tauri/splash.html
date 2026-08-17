@@ -94,18 +94,17 @@
     }
     .brand {
       display: flex;
-      align-items: baseline;
+      align-items: center;
       gap: 10px;
     }
     h1 {
       font-size: 28px;
-      font-weight: 300;
-      letter-spacing: 0.28em;
+      font-weight: 600;
+      letter-spacing: 0.06em;
       color: rgb(255, 255, 255);
       text-shadow: 0 0 18px rgba(103, 158, 254, 0.45);
       animation: word-in 900ms var(--ease-out) 360ms both;
     }
-    h1 b { font-weight: 700; }
     .badge {
       font-size: 10px;
       font-weight: 700;
@@ -202,8 +201,8 @@
       35% { filter: brightness(1.45) drop-shadow(0 0 22px rgba(103, 158, 254, 0.9)); }
     }
     @keyframes word-in {
-      from { opacity: 0; letter-spacing: 0.48em; filter: blur(6px); }
-      to { opacity: 1; letter-spacing: 0.28em; filter: blur(0); }
+      from { opacity: 0; letter-spacing: 0.16em; filter: blur(6px); }
+      to { opacity: 1; letter-spacing: 0.06em; filter: blur(0); }
     }
     @keyframes fade-up {
       from { opacity: 0; transform: translateY(8px); }
@@ -237,17 +236,19 @@
       </svg>
     </div>
     <div class="brand">
-      <h1>Deep<b>Seek</b></h1>
+      <h1>DeepSeek</h1>
       <span class="badge">HARNESS</span>
     </div>
     <div class="status-row">
-      <p id="status">正在准备运行环境…</p>
+      <p id="status" data-i18n="splash.preparing">正在准备运行环境…</p>
       <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
     </div>
     <div class="track" aria-hidden="true"><span id="bar"></span></div>
     <p id="error"></p>
   </div>
+  <script src="desktop-i18n.js"></script>
   <script>
+    window.DSH_I18N.apply()
     const statusEl = document.getElementById('status')
     const barEl = document.getElementById('bar')
     const errorEl = document.getElementById('error')
@@ -258,7 +259,7 @@
         document.body.classList.add('failed')
         errorEl.style.display = 'block'
         errorEl.textContent = text
-        statusEl.textContent = '启动失败'
+        statusEl.textContent = window.DSH_I18N.t('splash.failed')
       },
     }
   </script>

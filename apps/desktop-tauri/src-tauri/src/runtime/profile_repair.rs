@@ -11,6 +11,7 @@ use super::process::hide_console;
 use super::provision::{pnpm_js_entry, RuntimePaths};
 use super::user_home::{profile_dependencies_unresolved, profiles_needing_install};
 use super::ProvisionEvent;
+use crate::i18n::{self, Msg};
 
 /// How long one `dsh plugin --profile <name> install` may run before it is killed.
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(600);
@@ -37,7 +38,10 @@ pub async fn ensure_profile_installs(
     }
     boot_log::info(&format!("profile installs pending: {}", pending.join(", ")));
     for name in pending {
-        progress(ProvisionEvent::Status(format!("正在安装 profile {name} 依赖…")));
+        progress(ProvisionEvent::Status(i18n::tf(
+            Msg::ProfileInstalling,
+            &name,
+        )));
         let paths = paths.clone();
         let host_path = host_path.to_string();
         let name_for_task = name.clone();
@@ -48,15 +52,13 @@ pub async fn ensure_profile_installs(
         .map_err(|e| format!("profile {name} 安装任务失败: {e}"))?;
         match result {
             Ok(()) => {
-                progress(ProvisionEvent::Status(format!("profile {name} 依赖已就绪")));
+                progress(ProvisionEvent::Status(i18n::tf(Msg::ProfileReady, &name)));
                 boot_log::info(&format!("profile {name} dependencies installed"));
             }
             Err(error) => {
                 boot_log::error(&format!("profile {name} install failed: {error}"));
                 if name == HOST_PROFILE {
-                    return Err(format!(
-                        "profile {name} 依赖安装失败: {error}\n请检查网络后重试，或手动运行 dsh plugin --profile {name} install"
-                    ));
+                    return Err(i18n::tf2(Msg::ProfileInstallFailed, &name, &error));
                 }
             }
         }
@@ -152,7 +154,10 @@ fn drain_lines<R: std::io::Read>(reader: R, sink: Arc<Mutex<Vec<String>>>) {
 }
 
 fn format_output_tail(tail: &Arc<Mutex<Vec<String>>>) -> String {
-    let lines = tail.lock().map(|lines| lines.join("\n")).unwrap_or_default();
+    let lines = tail
+        .lock()
+        .map(|lines| lines.join("\n"))
+        .unwrap_or_default();
     if lines.is_empty() {
         String::new()
     } else {
@@ -209,7 +214,10 @@ mod tests {
         .unwrap();
         fs::create_dir_all(intact.join("node_modules").join("kept")).unwrap();
         fs::write(
-            intact.join("node_modules").join("kept").join("package.json"),
+            intact
+                .join("node_modules")
+                .join("kept")
+                .join("package.json"),
             r#"{"name":"kept"}"#,
         )
         .unwrap();

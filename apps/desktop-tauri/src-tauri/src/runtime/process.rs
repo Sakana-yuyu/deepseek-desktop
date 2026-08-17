@@ -101,7 +101,8 @@ fn process_image_path(pid: u32) -> Option<PathBuf> {
     use windows::core::PWSTR;
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Threading::{
-        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+        PROCESS_QUERY_LIMITED_INFORMATION,
     };
 
     let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
@@ -127,15 +128,17 @@ fn process_image_path(pid: u32) -> Option<PathBuf> {
 
 #[cfg(unix)]
 fn process_image_path(pid: u32) -> Option<PathBuf> {
-    std::fs::read_link(format!("/proc/{pid}/exe")).ok().or_else(|| {
-        let raw = std::fs::read_to_string(format!("/proc/{pid}/cmdline")).ok()?;
-        let first = raw.split('\0').next()?.trim();
-        if first.is_empty() {
-            None
-        } else {
-            Some(PathBuf::from(first))
-        }
-    })
+    std::fs::read_link(format!("/proc/{pid}/exe"))
+        .ok()
+        .or_else(|| {
+            let raw = std::fs::read_to_string(format!("/proc/{pid}/cmdline")).ok()?;
+            let first = raw.split('\0').next()?.trim();
+            if first.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(first))
+            }
+        })
 }
 
 #[cfg(not(any(windows, unix)))]

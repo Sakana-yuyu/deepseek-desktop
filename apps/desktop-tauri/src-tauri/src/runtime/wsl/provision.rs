@@ -3,6 +3,7 @@
 use std::fs;
 use std::path::Path;
 
+use crate::i18n::{self, Msg};
 use crate::overlay::{linux_plugin_file_url, overlay_yaml};
 use crate::runtime::config::{npm_registry, DEFAULT_NODE_VERSION, DEFAULT_PNPM_VERSION};
 use crate::runtime::host_env::node_version_compatible;
@@ -11,13 +12,18 @@ use crate::runtime::ProvisionEvent;
 
 use super::{windows_to_wsl_mount, WslOutput, WslRunner};
 
-const ERR_HARNESS: &str = "无法在 WSL 中安装 harness 树";
-const ERR_NODE: &str = "无法在 WSL 中安装 Node";
-const ERR_PNPM: &str = "无法在 WSL 中执行 pnpm install";
+fn err_harness() -> &'static str {
+    i18n::t(Msg::WslErrHarness)
+}
+fn err_node() -> &'static str {
+    i18n::t(Msg::WslErrNode)
+}
+fn err_pnpm() -> &'static str {
+    i18n::t(Msg::WslErrPnpm)
+}
 const PNPM_TIMEOUT_SECS: &str = "600";
 /// Linux-only PATH for `command -v node` so WSL does not surface Windows `node.exe`.
-const LINUX_PROBE_PATH: &str =
-    "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+const LINUX_PROBE_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
 /// Linux paths for a WSL-mode Host after provisioning.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -43,28 +49,41 @@ pub async fn ensure_wsl_runtime(
     _notify_url: Option<&str>,
     progress: impl Fn(ProvisionEvent),
 ) -> Result<WslRuntimePaths, String> {
-    progress(ProvisionEvent::Status("正在准备 WSL 运行环境…".into()));
+    progress(ProvisionEvent::Status(
+        i18n::t(Msg::StatusPrepareWsl).into(),
+    ));
 
     let linux_home = printenv_home(runner, distro)?;
-    let linux_harness_root = format!(
-        "{linux_home}/.local/share/dsh-desktop/harness-versions/{bundle_hash}"
-    );
+    let linux_harness_root =
+        format!("{linux_home}/.local/share/dsh-desktop/harness-versions/{bundle_hash}");
     let linux_cli = format!("{linux_harness_root}/apps/cli/lib/bin.js");
     let linux_runtime_root = format!("{linux_home}/.local/share/dsh-desktop/runtime");
     let preferred_node = format!("{linux_runtime_root}/node/bin/node");
     let linux_dsh_home = format!("{linux_home}/.dsh");
 
-    ensure_harness_tree(runner, distro, bundled_windows, &linux_harness_root, &linux_cli)?;
+    ensure_harness_tree(
+        runner,
+        distro,
+        bundled_windows,
+        &linux_harness_root,
+        &linux_cli,
+    )?;
     progress(ProvisionEvent::Progress(20));
 
-    let linux_node =
-        ensure_linux_node(runner, distro, &preferred_node, &linux_runtime_root, &progress).await?;
+    let linux_node = ensure_linux_node(
+        runner,
+        distro,
+        &preferred_node,
+        &linux_runtime_root,
+        &progress,
+    )
+    .await?;
     progress(ProvisionEvent::Progress(45));
 
     let node_bin_dir = linux_node
         .rsplit_once('/')
         .map(|(dir, _)| dir.to_string())
-        .ok_or_else(|| format!("{ERR_NODE}: invalid node path {linux_node}"))?;
+        .ok_or_else(|| format!("{}: invalid node path {linux_node}", err_node()))?;
     let linux_path = format!("{node_bin_dir}:/usr/bin");
 
     run_pnpm_install(runner, distro, &linux_path, &linux_harness_root)?;
@@ -92,11 +111,11 @@ pub async fn ensure_wsl_runtime(
 
 fn printenv_home(runner: &dyn WslRunner, distro: &str) -> Result<String, String> {
     let out = wsl_exec(runner, distro, &["printenv", "HOME"])
-        .map_err(|e| format!("{ERR_HARNESS}: {e}"))?;
-    require_success(&out, ERR_HARNESS)?;
+        .map_err(|e| format!("{}: {e}", err_harness()))?;
+    require_success(&out, err_harness())?;
     let home = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if home.is_empty() || !home.starts_with('/') {
-        return Err(format!("{ERR_HARNESS}: empty or invalid HOME"));
+        return Err(format!("{}: empty or invalid HOME", err_harness()));
     }
     Ok(home)
 }
@@ -112,17 +131,17 @@ fn ensure_harness_tree(
         return Ok(());
     }
 
-    let src = windows_to_wsl_mount(bundled_windows)
-        .map_err(|e| format!("{ERR_HARNESS}: {e}"))?;
+    let src =
+        windows_to_wsl_mount(bundled_windows).map_err(|e| format!("{}: {e}", err_harness()))?;
     let mkdir = wsl_exec(runner, distro, &["mkdir", "-p", linux_harness_root])
-        .map_err(|e| format!("{ERR_HARNESS}: {e}"))?;
-    require_success(&mkdir, ERR_HARNESS)?;
+        .map_err(|e| format!("{}: {e}", err_harness()))?;
+    require_success(&mkdir, err_harness())?;
 
     let src_dot = format!("{src}/.");
     let dest_slash = format!("{linux_harness_root}/");
     let copy = wsl_exec(runner, distro, &["cp", "-a", &src_dot, &dest_slash])
-        .map_err(|e| format!("{ERR_HARNESS}: {e}"))?;
-    require_success(&copy, ERR_HARNESS)?;
+        .map_err(|e| format!("{}: {e}", err_harness()))?;
+    require_success(&copy, err_harness())?;
     Ok(())
 }
 
@@ -139,7 +158,7 @@ async fn ensure_linux_node(
 
     let which_script = format!("PATH={LINUX_PROBE_PATH} command -v node");
     let which = wsl_exec(runner, distro, &["/bin/sh", "-c", &which_script])
-        .map_err(|e| format!("{ERR_NODE}: {e}"))?;
+        .map_err(|e| format!("{}: {e}", err_node()))?;
     if which.code == 0 {
         let path = String::from_utf8_lossy(&which.stdout).trim().to_string();
         if !path.is_empty() && !is_windows_hosted_node_path(&path) {
@@ -154,9 +173,7 @@ async fn ensure_linux_node(
 
 /// True when `path` looks like a Windows Node image reached via `/mnt` or `.exe`.
 fn is_windows_hosted_node_path(path: &str) -> bool {
-    path.contains('\\')
-        || path.to_ascii_lowercase().ends_with(".exe")
-        || path.starts_with("/mnt/")
+    path.contains('\\') || path.to_ascii_lowercase().ends_with(".exe") || path.starts_with("/mnt/")
 }
 
 fn probe_compatible_node(
@@ -170,14 +187,14 @@ fn probe_compatible_node(
 
     if node_path != "node" {
         let exists = wsl_exec(runner, distro, &["test", "-x", node_path])
-            .map_err(|e| format!("{ERR_NODE}: {e}"))?;
+            .map_err(|e| format!("{}: {e}", err_node()))?;
         if exists.code != 0 {
             return Ok(None);
         }
     }
 
-    let ver = wsl_exec(runner, distro, &[node_path, "-v"])
-        .map_err(|e| format!("{ERR_NODE}: {e}"))?;
+    let ver =
+        wsl_exec(runner, distro, &[node_path, "-v"]).map_err(|e| format!("{}: {e}", err_node()))?;
     if ver.code != 0 {
         return Ok(None);
     }
@@ -204,33 +221,34 @@ async fn install_linux_node(
 
     let arch = linux_arch(runner, distro)?;
     let spec = node_archive_spec_for(DEFAULT_NODE_VERSION, "linux", &arch)
-        .map_err(|e| format!("{ERR_NODE}: {e}"))?;
+        .map_err(|e| format!("{}: {e}", err_node()))?;
 
     let cache = crate::runtime::app_data_root()
-        .map_err(|e| format!("{ERR_NODE}: {e}"))?
+        .map_err(|e| format!("{}: {e}", err_node()))?
         .join("cache");
-    fs::create_dir_all(&cache).map_err(|e| format!("{ERR_NODE}: {e}"))?;
+    fs::create_dir_all(&cache).map_err(|e| format!("{}: {e}", err_node()))?;
     let archive_path = cache.join(&spec.archive_name);
     if !archive_path.is_file() {
-        progress(ProvisionEvent::Status(format!(
-            "正在下载 Linux Node {DEFAULT_NODE_VERSION}…"
+        progress(ProvisionEvent::Status(i18n::tf(
+            Msg::StatusDownloadLinuxNode,
+            DEFAULT_NODE_VERSION,
         )));
         download_file(&spec.url, &archive_path, 30, 40, progress)
             .await
-            .map_err(|e| format!("{ERR_NODE}: {e}"))?;
+            .map_err(|e| format!("{}: {e}", err_node()))?;
     }
 
-    let archive_mnt = windows_to_wsl_mount(&archive_path)
-        .map_err(|e| format!("{ERR_NODE}: {e}"))?;
+    let archive_mnt =
+        windows_to_wsl_mount(&archive_path).map_err(|e| format!("{}: {e}", err_node()))?;
     let node_dir = format!("{linux_runtime_root}/node");
 
     let rm = wsl_exec(runner, distro, &["rm", "-rf", &node_dir])
-        .map_err(|e| format!("{ERR_NODE}: {e}"))?;
-    require_success(&rm, ERR_NODE)?;
+        .map_err(|e| format!("{}: {e}", err_node()))?;
+    require_success(&rm, err_node())?;
 
     let mkdir = wsl_exec(runner, distro, &["mkdir", "-p", &node_dir])
-        .map_err(|e| format!("{ERR_NODE}: {e}"))?;
-    require_success(&mkdir, ERR_NODE)?;
+        .map_err(|e| format!("{}: {e}", err_node()))?;
+    require_success(&mkdir, err_node())?;
 
     let tar = wsl_exec(
         runner,
@@ -244,24 +262,24 @@ async fn install_linux_node(
             &node_dir,
         ],
     )
-    .map_err(|e| format!("{ERR_NODE}: {e}"))?;
-    require_success(&tar, ERR_NODE)?;
+    .map_err(|e| format!("{}: {e}", err_node()))?;
+    require_success(&tar, err_node())?;
 
     let check = wsl_exec(runner, distro, &["test", "-x", preferred_node])
-        .map_err(|e| format!("{ERR_NODE}: {e}"))?;
-    require_success(&check, ERR_NODE)?;
+        .map_err(|e| format!("{}: {e}", err_node()))?;
+    require_success(&check, err_node())?;
     Ok(preferred_node.to_string())
 }
 
 fn linux_arch(runner: &dyn WslRunner, distro: &str) -> Result<String, String> {
-    let out = wsl_exec(runner, distro, &["uname", "-m"])
-        .map_err(|e| format!("{ERR_NODE}: {e}"))?;
-    require_success(&out, ERR_NODE)?;
+    let out =
+        wsl_exec(runner, distro, &["uname", "-m"]).map_err(|e| format!("{}: {e}", err_node()))?;
+    require_success(&out, err_node())?;
     let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
     match raw.as_str() {
         "x86_64" => Ok("x86_64".into()),
         "aarch64" | "arm64" => Ok("aarch64".into()),
-        other => Err(format!("{ERR_NODE}: unsupported uname -m: {other}")),
+        other => Err(format!("{}: unsupported uname -m: {other}", err_node())),
     }
 }
 
@@ -295,8 +313,8 @@ fn run_pnpm_install(
             &registry,
         ],
     )
-    .map_err(|e| format!("{ERR_PNPM}: {e}"))?;
-    require_success(&out, ERR_PNPM)?;
+    .map_err(|e| format!("{}: {e}", err_pnpm()))?;
+    require_success(&out, err_pnpm())?;
     Ok(())
 }
 
@@ -315,25 +333,23 @@ fn seed_linux_home(
     }
 
     let mkdir = wsl_exec(runner, distro, &["mkdir", "-p", linux_dsh_home])
-        .map_err(|e| format!("{ERR_HARNESS}: {e}"))?;
-    require_success(&mkdir, ERR_HARNESS)?;
+        .map_err(|e| format!("{}: {e}", err_harness()))?;
+    require_success(&mkdir, err_harness())?;
 
     let win_cred = windows_dsh_home.join(".credentials.yaml");
     if win_cred.is_file() {
-        let src = windows_to_wsl_mount(&win_cred)
-            .map_err(|e| format!("{ERR_HARNESS}: {e}"))?;
+        let src = windows_to_wsl_mount(&win_cred).map_err(|e| format!("{}: {e}", err_harness()))?;
         let copy = wsl_exec(runner, distro, &["cp", &src, &cred_dest])
-            .map_err(|e| format!("{ERR_HARNESS}: {e}"))?;
-        require_success(&copy, ERR_HARNESS)?;
+            .map_err(|e| format!("{}: {e}", err_harness()))?;
+        require_success(&copy, err_harness())?;
     }
 
     let win_env = windows_dsh_home.join(".env");
     if win_env.is_file() {
-        let src = windows_to_wsl_mount(&win_env)
-            .map_err(|e| format!("{ERR_HARNESS}: {e}"))?;
+        let src = windows_to_wsl_mount(&win_env).map_err(|e| format!("{}: {e}", err_harness()))?;
         let copy = wsl_exec(runner, distro, &["cp", &src, &env_dest])
-            .map_err(|e| format!("{ERR_HARNESS}: {e}"))?;
-        require_success(&copy, ERR_HARNESS)?;
+            .map_err(|e| format!("{}: {e}", err_harness()))?;
+        require_success(&copy, err_harness())?;
     }
 
     Ok(())
@@ -359,34 +375,37 @@ fn implant_overlay(
     let plugin_url = linux_plugin_file_url(&plugin_dest)?;
     let yaml = overlay_yaml(&plugin_url);
 
-    let mkdir = wsl_exec(runner, distro, &["mkdir", "-p", &dest_dir])
-        .map_err(|e| e.to_string())?;
-    require_success(&mkdir, "无法写入 WSL overlay")?;
+    let mkdir = wsl_exec(runner, distro, &["mkdir", "-p", &dest_dir]).map_err(|e| e.to_string())?;
+    require_success(&mkdir, i18n::t(Msg::WslErrOverlay))?;
 
     let src_mnt = windows_to_wsl_mount(&plugin_src)?;
-    let copy = wsl_exec(runner, distro, &["cp", &src_mnt, &plugin_dest])
-        .map_err(|e| e.to_string())?;
-    require_success(&copy, "无法写入 WSL overlay")?;
+    let copy =
+        wsl_exec(runner, distro, &["cp", &src_mnt, &plugin_dest]).map_err(|e| e.to_string())?;
+    require_success(&copy, i18n::t(Msg::WslErrOverlay))?;
 
     let cache = crate::runtime::app_data_root()?.join("cache");
     fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
     let yaml_path = cache.join("wsl-desktop-overlay-cordis.yml");
     fs::write(&yaml_path, yaml).map_err(|e| e.to_string())?;
     let yaml_mnt = windows_to_wsl_mount(&yaml_path)?;
-    let copy_yaml = wsl_exec(runner, distro, &["cp", &yaml_mnt, &patch_dest])
-        .map_err(|e| e.to_string())?;
-    require_success(&copy_yaml, "无法写入 WSL overlay")?;
+    let copy_yaml =
+        wsl_exec(runner, distro, &["cp", &yaml_mnt, &patch_dest]).map_err(|e| e.to_string())?;
+    require_success(&copy_yaml, i18n::t(Msg::WslErrOverlay))?;
 
     Ok(patch_dest)
 }
 
 fn wsl_test_f(runner: &dyn WslRunner, distro: &str, path: &str) -> Result<bool, String> {
     let out = wsl_exec(runner, distro, &["test", "-f", path])
-        .map_err(|e| format!("{ERR_HARNESS}: {e}"))?;
+        .map_err(|e| format!("{}: {e}", err_harness()))?;
     Ok(out.code == 0)
 }
 
-fn wsl_exec(runner: &dyn WslRunner, distro: &str, program_args: &[&str]) -> Result<WslOutput, String> {
+fn wsl_exec(
+    runner: &dyn WslRunner,
+    distro: &str,
+    program_args: &[&str],
+) -> Result<WslOutput, String> {
     let mut args: Vec<&str> = Vec::with_capacity(3 + program_args.len());
     args.push("-d");
     args.push(distro);
@@ -494,9 +513,8 @@ mod tests {
         fs::write(windows_home.join("sessions").join("a.json"), "{}").unwrap();
 
         let hash = "abc123";
-        let harness_bin = format!(
-            "/home/u/.local/share/dsh-desktop/harness-versions/{hash}/apps/cli/lib/bin.js"
-        );
+        let harness_bin =
+            format!("/home/u/.local/share/dsh-desktop/harness-versions/{hash}/apps/cli/lib/bin.js");
         let preferred_node = "/home/u/.local/share/dsh-desktop/runtime/node/bin/node";
         let cred_dest = "/home/u/.dsh/.credentials.yaml";
         let env_dest = "/home/u/.dsh/.env";
@@ -524,7 +542,12 @@ mod tests {
                 fail_out(),
             ),
             (
-                vec!["-d".into(), "Ubuntu".into(), "--exec".into(), "mkdir".into()],
+                vec![
+                    "-d".into(),
+                    "Ubuntu".into(),
+                    "--exec".into(),
+                    "mkdir".into(),
+                ],
                 ok_out(""),
             ),
             (
@@ -575,7 +598,12 @@ mod tests {
                 ok_out("v22.19.0\n"),
             ),
             (
-                vec!["-d".into(), "Ubuntu".into(), "--exec".into(), "timeout".into()],
+                vec![
+                    "-d".into(),
+                    "Ubuntu".into(),
+                    "--exec".into(),
+                    "timeout".into(),
+                ],
                 ok_out(""),
             ),
             (
@@ -706,9 +734,8 @@ mod tests {
         let bundled = temp_dir("bundled-win-node");
         let windows_home = temp_dir("win-home-win-node");
         let hash = "def456";
-        let harness_bin = format!(
-            "/home/u/.local/share/dsh-desktop/harness-versions/{hash}/apps/cli/lib/bin.js"
-        );
+        let harness_bin =
+            format!("/home/u/.local/share/dsh-desktop/harness-versions/{hash}/apps/cli/lib/bin.js");
         let preferred_node = "/home/u/.local/share/dsh-desktop/runtime/node/bin/node";
         let windows_node = "/mnt/c/Program Files/nodejs/node.exe";
 
@@ -781,7 +808,12 @@ mod tests {
                 ok_out("v22.19.0\n"),
             ),
             (
-                vec!["-d".into(), "Ubuntu".into(), "--exec".into(), "timeout".into()],
+                vec![
+                    "-d".into(),
+                    "Ubuntu".into(),
+                    "--exec".into(),
+                    "timeout".into(),
+                ],
                 ok_out(""),
             ),
             // Linux home already seeded — skip credential copy.

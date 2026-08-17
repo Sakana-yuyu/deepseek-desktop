@@ -92,11 +92,7 @@ fn linux_button_layout() -> (Vec<WindowButton>, Vec<WindowButton>) {
 #[cfg(target_os = "linux")]
 fn gnome_button_layout() -> Option<String> {
     let output = std::process::Command::new("gsettings")
-        .args([
-            "get",
-            "org.gnome.desktop.wm.preferences",
-            "button-layout",
-        ])
+        .args(["get", "org.gnome.desktop.wm.preferences", "button-layout"])
         .output()
         .ok()?;
     if !output.status.success() {

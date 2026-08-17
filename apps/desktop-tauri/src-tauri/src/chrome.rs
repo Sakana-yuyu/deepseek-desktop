@@ -8,6 +8,7 @@ use tauri::{AppHandle, Manager, Theme, WebviewUrl, WebviewWindowBuilder, WindowE
 const DSH_BG: Color = Color(21, 21, 23, 255);
 
 use crate::desktop_settings::{self, AgentEnvironment, CloseAction};
+use crate::i18n::{self, Msg};
 use crate::notify;
 use crate::runtime::boot_log;
 use crate::runtime::DesktopRuntime;
@@ -15,19 +16,38 @@ use crate::window_layout::resolve_controls_layout;
 
 static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-/// True when the user chose a full process exit (tray Quit or close-action Exit).
+/// True when the process is allowed to exit (tray Quit/Restart, Exit close, updater restart).
 pub fn quit_requested() -> bool {
     QUIT_REQUESTED.load(Ordering::SeqCst)
 }
 
 /// Exit the process after marking quit so `ExitRequested` is not cancelled.
 pub fn request_quit(app: &AppHandle) {
-    QUIT_REQUESTED.store(true, Ordering::SeqCst);
-    stop_host(app);
+    mark_process_end(app);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.destroy();
     }
     app.exit(0);
+}
+
+/// Relaunch the desktop process. Stops the Host first because `app.restart`
+/// skips `Drop`, and marks quit so a non-main-thread restart is not cancelled.
+pub fn request_restart(app: &AppHandle) -> ! {
+    mark_process_end(app);
+    app.restart()
+}
+
+/// Webview-facing restart: the plugin store's "重启" button asks for a full
+/// app relaunch (shell + Host), not just a Host restart. Calls through to
+/// `request_restart`, which stops the Host and relaunches this process.
+#[tauri::command]
+pub fn restart_app(app: AppHandle) {
+    request_restart(&app)
+}
+
+fn mark_process_end(app: &AppHandle) {
+    QUIT_REQUESTED.store(true, Ordering::SeqCst);
+    stop_host(app);
 }
 
 /// Reap the Host Node tree. `app.exit` / `app.restart` skip `Drop`.
@@ -49,10 +69,15 @@ pub fn open_main_window(app: &AppHandle, url: &str) -> Result<(), String> {
         .default_window_icon()
         .cloned()
         .ok_or_else(|| "default window icon is missing".to_string())?;
+    let locale = match i18n::current() {
+        i18n::Locale::Zh => "zh",
+        i18n::Locale::En => "en",
+    };
     let init = format!(
-        "window.__DSH_WEB_URL__ = {}; window.__DSH_CHROME__ = {};",
+        "window.__DSH_WEB_URL__ = {}; window.__DSH_CHROME__ = {}; window.__DSH_LOCALE__ = {};",
         serde_json::to_string(url).unwrap_or_else(|_| "\"\"".into()),
-        serde_json::to_string(&resolve_controls_layout()).unwrap_or_else(|_| "{}".into())
+        serde_json::to_string(&resolve_controls_layout()).unwrap_or_else(|_| "{}".into()),
+        serde_json::to_string(locale).unwrap_or_else(|_| "\"en\"".into()),
     );
 
     let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("shell.html".into()))
@@ -133,9 +158,9 @@ pub fn set_close_action(app: AppHandle, action: String) -> Result<(), String> {
 pub fn remember_close_action(app: &AppHandle, action: Option<CloseAction>) -> Result<(), String> {
     save_close_action(action)?;
     let message = match action {
-        Some(CloseAction::Minimize) => "关闭窗口将最小化到托盘",
-        Some(CloseAction::Exit) => "关闭窗口将退出程序",
-        None => "下次关闭窗口时会再询问",
+        Some(CloseAction::Minimize) => i18n::t(Msg::ToastCloseMin),
+        Some(CloseAction::Exit) => i18n::t(Msg::ToastCloseExit),
+        None => i18n::t(Msg::ToastCloseAsk),
     };
     notify::toast(app, "DeepSeek Harness", message);
     Ok(())
@@ -180,7 +205,7 @@ fn hide_close_prompt(app: &AppHandle) {
 
 /// Toast copy when the tray changes the agent runtime target.
 pub fn environment_changed_message() -> &'static str {
-    "运行环境将在重启后生效"
+    i18n::t(Msg::EnvRestart)
 }
 
 /// Persist the agent runtime target from the tray without restarting the Host.
@@ -196,7 +221,7 @@ pub fn remember_agent_environment(app: &AppHandle, value: AgentEnvironment) {
         Ok(()) => notify::toast(app, "DeepSeek Harness", environment_changed_message()),
         Err(error) => {
             boot_log::error(&format!("tray agent environment save failed: {error}"));
-            notify::toast(app, "保存运行环境失败", &error);
+            notify::toast(app, i18n::t(Msg::EnvSaveFailed), &error);
         }
     }
 }

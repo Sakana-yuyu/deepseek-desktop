@@ -7,6 +7,7 @@ pub mod provision;
 pub mod sys;
 
 // Consumed by `supervisor::spawn_wsl_web_host`.
+pub(crate) use launch::reject_windows_node;
 pub use launch::{build_wsl_web_command, WslCommand, WslLaunchSpec};
 
 pub use path::windows_to_wsl_mount;

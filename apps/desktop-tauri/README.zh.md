@@ -15,7 +15,7 @@
 | **依赖** | — | 在平台应用数据目录执行 `pnpm install --prod --no-frozen-lockfile`（裁剪包与 lockfile 不完全相同；移除 `CI`，避免 pnpm 强制冻结安装） |
 | **Host** | — | `node apps/cli/lib/bin.js web --host 127.0.0.1`；启动时加载失败的插件会被禁用，然后重试 Host |
 | **UI** | 本地 `shell.html` 标题栏 | 无边框窗口嵌入 `dsh web`；启动页是紧贴内容的透明窗口，中间一块无边框、四周淡出的毛玻璃，带官方鱼形标志、DeepSeek 字标和进度条；第一次关闭是与 web 客户端一致的页内浅色对话框；Windows 控件在右，macOS 在左，Linux 读取窗口管理器按钮布局 |
-| **托盘** | 原生托盘图标 | 第一次关闭询问最小化到托盘还是退出，并写入 `desktop-settings.json`；托盘可改该偏好、显示窗口、检查更新或退出。退出会停止 Host 的 Node 进程树；最小化到托盘则保持运行 |
+| **托盘** | 原生托盘图标 | 第一次关闭询问最小化到托盘还是退出，并写入 `desktop-settings.json`；托盘可改该偏好、显示窗口、安装 Sakana 插件库（在当前 Host 主目录执行 `dsh plugin --profile web add github:Sakana-yuyu/dsh-plugins`）、检查更新、重启或退出。重启和退出都会停止 Host 的 Node 进程树；重启随后重新拉起桌面进程。插件库安装成功后走同一条重启路径，以便加载该库。最小化到托盘则保持 Host 运行 |
 | **通知** | Overlay 插件 + 本机 POST | `turn/end` 且 `completed` 时，窗口不在前台则弹出系统通知并播放 `sounds/complete.wav` |
 | **更新** | 内置更新公钥 | 检查稳定的 GitHub 更新 manifest，验证下载产物签名，安装并重启 |
 | **Agent 环境** | Windows（默认）或 WSL | 托盘写入 `desktop-settings.json`；WSL 在默认 WSL2 发行版内启动 Linux `dsh web`；需重启后生效 |
@@ -63,7 +63,7 @@ pnpm run build:win
 
 安装包输出：`src-tauri/target/release/bundle/nsis/DeepSeek Harness_0.1.0-rc.5-0.5_x64-setup.exe`
 
-NSIS 安装包包含**英语**、**简体中文**和**繁体中文**。安装语言自动跟随操作系统 locale，不显示语言选择器；不支持的 locale 使用英语。复制文件前，安装器会静默关闭 `dsh-desktop.exe` 及其子进程树。安装后，安装器使用独立的版本化 ICO 资源重建已有桌面快捷方式，并通知 Explorer 清除陈旧的图标缓存记录。
+NSIS 安装包包含**英语**、**简体中文**和**繁体中文**。安装语言自动跟随操作系统 locale，不显示语言选择器；不支持的 locale 使用英语。原生启动页、托盘、关闭对话框和启动状态文案遵循同一规则（`zh*` 用中文，其余用英语）。嵌入的 `dsh web` 客户端仍使用自己的 Settings 语言。复制文件前，安装器会静默关闭 `dsh-desktop.exe` 及其子进程树。安装后，安装器使用独立的版本化 ICO 资源重建已有桌面快捷方式，并通知 Explorer 清除陈旧的图标缓存记录。
 
 ## 发布
 

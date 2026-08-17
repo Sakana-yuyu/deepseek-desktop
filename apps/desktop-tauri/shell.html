@@ -211,27 +211,33 @@
     <div class="modal-mask" data-dismiss></div>
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="close-title">
       <div class="modal-header">
-        <h2 id="close-title">关闭窗口</h2>
-        <button type="button" class="modal-x" data-dismiss aria-label="取消">
+        <h2 id="close-title" data-i18n="shell.closeTitle">关闭窗口</h2>
+        <button type="button" class="modal-x" data-dismiss data-i18n-aria="shell.cancel" aria-label="取消">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
             <path d="M3 3 L11 11 M11 3 L3 11" stroke="currentColor" stroke-width="1.4"/>
           </svg>
         </button>
       </div>
-      <p class="modal-desc">下次将记住这个选择，可在托盘菜单里改回。</p>
+      <p class="modal-desc" data-i18n="shell.closeDesc">下次将记住这个选择，可在托盘菜单里改回。</p>
       <div class="modal-footer">
-        <button type="button" class="btn outline" id="close-exit">退出程序</button>
-        <button type="button" class="btn primary" id="close-minimize">最小化到托盘</button>
+        <button type="button" class="btn outline" id="close-exit" data-i18n="shell.exit">退出程序</button>
+        <button type="button" class="btn primary" id="close-minimize" data-i18n="shell.minimizeTray">最小化到托盘</button>
       </div>
     </div>
   </div>
+  <script src="desktop-i18n.js"></script>
   <script>
+    window.DSH_I18N.apply()
     const icons = {
       minimize: '<svg viewBox="0 0 10 10" aria-hidden="true"><rect x="1" y="5" width="8" height="1" fill="currentColor"/></svg>',
       maximize: '<svg viewBox="0 0 10 10" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1"/></svg>',
       close: '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2 L8 8 M8 2 L2 8" stroke="currentColor" stroke-width="1.2"/></svg>',
     }
-    const labels = { minimize: '最小化', maximize: '最大化', close: '关闭' }
+    const labels = {
+      minimize: window.DSH_I18N.t('shell.min'),
+      maximize: window.DSH_I18N.t('shell.max'),
+      close: window.DSH_I18N.t('shell.close'),
+    }
 
     function button(kind) {
       const el = document.createElement('button')

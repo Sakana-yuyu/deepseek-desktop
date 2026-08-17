@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-14-desktop-path-bridge.md
-2026-08-14-desktop-path-bridge.md: b05e20e279229f1e12522c17c384506ad4ca49fe
-2026-08-14-desktop-path-bridge.zh.md: 8a839b96d9b59fd4d88ef14fb52e1667859e6b64
+2026-08-14-desktop-path-bridge.md: 00c9f14c4fbab867da262b1519680f2b0ee93713
+2026-08-14-desktop-path-bridge.zh.md: 4ece264e1db159e83ca89ed8c6f1637a906fe1b8

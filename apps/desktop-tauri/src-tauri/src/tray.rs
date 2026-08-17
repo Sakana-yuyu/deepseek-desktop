@@ -6,47 +6,69 @@ use tauri::AppHandle;
 
 use crate::chrome;
 use crate::desktop_settings::{AgentEnvironment, CloseAction};
+use crate::i18n::{self, Msg};
 use crate::notify;
 use crate::runtime::boot_log;
+use crate::runtime::plugin_catalog;
 use crate::updater;
 
 /// Install the tray icon and its menu. Closing the window uses the saved close action.
 pub fn install(app: &AppHandle) -> Result<(), String> {
-    let show = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)
+    let show = MenuItem::with_id(app, "show", i18n::t(Msg::TrayShow), true, None::<&str>)
         .map_err(|e| e.to_string())?;
     let close_min = MenuItem::with_id(
         app,
         "close-minimize",
-        "关闭时最小化到托盘",
+        i18n::t(Msg::TrayCloseMin),
         true,
         None::<&str>,
     )
     .map_err(|e| e.to_string())?;
-    let close_exit =
-        MenuItem::with_id(app, "close-exit", "关闭时退出程序", true, None::<&str>)
-            .map_err(|e| e.to_string())?;
-    let close_ask =
-        MenuItem::with_id(app, "close-ask", "下次关闭时再询问", true, None::<&str>)
-            .map_err(|e| e.to_string())?;
+    let close_exit = MenuItem::with_id(
+        app,
+        "close-exit",
+        i18n::t(Msg::TrayCloseExit),
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
+    let close_ask = MenuItem::with_id(
+        app,
+        "close-ask",
+        i18n::t(Msg::TrayCloseAsk),
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
     let env_windows = MenuItem::with_id(
         app,
         "env-windows",
-        "运行环境：Windows",
+        i18n::t(Msg::TrayEnvWindows),
         true,
         None::<&str>,
     )
     .map_err(|e| e.to_string())?;
-    let env_wsl = MenuItem::with_id(
-        app,
-        "env-wsl",
-        "运行环境：WSL（需重启）",
-        true,
-        None::<&str>,
-    )
-    .map_err(|e| e.to_string())?;
-    let update = MenuItem::with_id(app, "update", "检查更新", true, None::<&str>)
+    let env_wsl = MenuItem::with_id(app, "env-wsl", i18n::t(Msg::TrayEnvWsl), true, None::<&str>)
         .map_err(|e| e.to_string())?;
-    let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)
+    let update = MenuItem::with_id(app, "update", i18n::t(Msg::TrayUpdate), true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let restart = MenuItem::with_id(
+        app,
+        "restart",
+        i18n::t(Msg::TrayRestart),
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
+    let install_catalog = MenuItem::with_id(
+        app,
+        "install-catalog",
+        i18n::t(Msg::TrayInstallCatalog),
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
+    let quit = MenuItem::with_id(app, "quit", i18n::t(Msg::TrayQuit), true, None::<&str>)
         .map_err(|e| e.to_string())?;
     let menu = Menu::with_items(
         app,
@@ -57,7 +79,9 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
             &close_ask,
             &env_windows,
             &env_wsl,
+            &install_catalog,
             &update,
+            &restart,
             &quit,
         ],
     )
@@ -89,6 +113,7 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
             "env-wsl" => {
                 chrome::remember_agent_environment(app, AgentEnvironment::Wsl);
             }
+            "install-catalog" => plugin_catalog::begin_from_tray(app),
             "update" => {
                 let app = app.clone();
                 tauri::async_runtime::spawn(async move {
@@ -96,11 +121,12 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
                         Ok(message) => notify::toast(&app, "DeepSeek Harness", &message),
                         Err(error) => {
                             boot_log::error(&format!("tray update failed: {error}"));
-                            notify::toast(&app, "检查更新失败", &error);
+                            notify::toast(&app, i18n::t(Msg::TrayUpdateFailed), &error);
                         }
                     }
                 });
             }
+            "restart" => chrome::request_restart(app),
             "quit" => chrome::request_quit(app),
             _ => {}
         })

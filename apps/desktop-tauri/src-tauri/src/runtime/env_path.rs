@@ -56,12 +56,11 @@ pub fn is_direct_spawnable_cli(path: &Path) -> bool {
     #[cfg(windows)]
     {
         matches!(
-            path.extension()
-                .and_then(|ext| ext.to_str())
-                .map(|ext| ext.eq_ignore_ascii_case("exe")
-                    || ext.eq_ignore_ascii_case("cmd")
-                    || ext.eq_ignore_ascii_case("bat")
-                    || ext.eq_ignore_ascii_case("com")),
+            path.extension().and_then(|ext| ext.to_str()).map(|ext| ext
+                .eq_ignore_ascii_case("exe")
+                || ext.eq_ignore_ascii_case("cmd")
+                || ext.eq_ignore_ascii_case("bat")
+                || ext.eq_ignore_ascii_case("com")),
             Some(true)
         )
     }
@@ -84,7 +83,10 @@ pub fn path_eq(left: &Path, right: &Path) -> bool {
 }
 
 /// Append directories that are not already on `existing`, preserving order.
-pub fn append_unique_path(existing: Option<impl AsRef<std::ffi::OsStr>>, extra: &[PathBuf]) -> OsString {
+pub fn append_unique_path(
+    existing: Option<impl AsRef<std::ffi::OsStr>>,
+    extra: &[PathBuf],
+) -> OsString {
     let mut parts = Vec::new();
     if let Some(existing) = existing {
         for dir in std::env::split_paths(existing.as_ref()) {
@@ -98,7 +100,8 @@ pub fn append_unique_path(existing: Option<impl AsRef<std::ffi::OsStr>>, extra: 
             parts.push(dir.clone());
         }
     }
-    std::env::join_paths(parts).unwrap_or_else(|_| extra.first().cloned().unwrap_or_default().into())
+    std::env::join_paths(parts)
+        .unwrap_or_else(|_| extra.first().cloned().unwrap_or_default().into())
 }
 
 fn durable_path_dirs() -> Vec<PathBuf> {
@@ -131,7 +134,10 @@ fn path_list_contains(dirs: &[PathBuf], candidate: &Path) -> bool {
 }
 
 fn first_nonempty<const N: usize>(values: [Option<String>; N]) -> Option<String> {
-    values.into_iter().flatten().find(|value| !value.trim().is_empty())
+    values
+        .into_iter()
+        .flatten()
+        .find(|value| !value.trim().is_empty())
 }
 
 fn expand_home_prefix(path: &str) -> PathBuf {
@@ -255,11 +261,9 @@ mod tests {
     #[cfg(not(windows))]
     #[test]
     fn appends_missing_unix_dirs_without_duplicates() {
-        let existing = std::env::join_paths([
-            PathBuf::from("/usr/bin"),
-            PathBuf::from("/usr/local/bin"),
-        ])
-        .unwrap();
+        let existing =
+            std::env::join_paths([PathBuf::from("/usr/bin"), PathBuf::from("/usr/local/bin")])
+                .unwrap();
         let extra = [
             PathBuf::from("/usr/local/bin"),
             PathBuf::from("/home/me/.local/share/pnpm"),

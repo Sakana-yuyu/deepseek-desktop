@@ -16,7 +16,7 @@ Windows 上这些查找比用户终端更严。Node 在 CVE-2024-27980 加固之
 
 - `dsh.cmd`（以及 Unix 上的 `dsh` 脚本），先把选定 Node 和 pnpm 目录前置到 `PATH`，再 exec 已选定的 Node 与 `apps/cli/lib/bin.js`
 - `dsh-launch.json`，记录该 Node、CLI 入口、`$DSH_HOME` 和同一份 `pathPrepend` 目录
-- `dsh.exe` — 桌面二进制的硬链接或副本；当 `argv0` 为 `dsh` 时，若父控制台可见则附着它，把 sidecar 的 `pathPrepend` 应用到 `PATH`，并在父控制台缺失或隐藏时用 `CREATE_NO_WINDOW` exec sidecar 的 Node，而不是打开 GUI
+- `dsh.exe` — 桌面二进制的硬链接或副本，仅在缺失、大小不同、或比该二进制更旧时刷新；当 `argv0` 为 `dsh` 时，若父控制台可见则附着它，把 sidecar 的 `pathPrepend` 应用到 `PATH`，并在父控制台缺失或隐藏时用 `CREATE_NO_WINDOW` exec sidecar 的 Node，而不是打开 GUI
 - `pnpm.cmd`（Unix 上为 `pnpm`）：若选定 pnpm 旁存在 `pnpm.cjs` 则运行 `node …/pnpm.cjs`，否则 `call` `.cmd` / `.bat` 或 exec 选定二进制
 
 因此每个 `dsh` 入口都优先解析预配的 pnpm：任何终端里运行 `dsh plugin` 用的都与桌面端同一个 pnpm 大版本，一个 profile 只落在一个 pnpm store 上；旧版构建写出的无 `pathPrepend` sidecar 仍可解析（前置为空），行为不变。

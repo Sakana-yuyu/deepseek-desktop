@@ -3,11 +3,10 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use super::config::{
-    DEFAULT_NODE_VERSION, MIN_NODE_MINOR_FOR_22, MIN_UNRESTRICTED_NODE_MAJOR,
-};
+use super::config::{DEFAULT_NODE_VERSION, MIN_NODE_MINOR_FOR_22, MIN_UNRESTRICTED_NODE_MAJOR};
 use super::env_path::{is_direct_spawnable_cli, which_on_host};
 use super::process::hide_console;
+use crate::i18n::{self, Msg};
 
 /// Host toolchain selected for provisioning and Host startup.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -76,16 +75,16 @@ pub fn scan_host_toolchain(preferred_node: &Path, preferred_pnpm: &Path) -> Host
 /// Human-readable splash line after a toolchain scan.
 pub fn toolchain_status(toolchain: &HostToolchain) -> String {
     match (&toolchain.node, &toolchain.pnpm) {
-        (Some(node), Some(_)) => format!(
-            "已匹配本机 Node {}，跳过运行时下载",
-            tool_version(node).unwrap_or_else(|| format!("v{DEFAULT_NODE_VERSION}"))
+        (Some(node), Some(_)) => i18n::tf(
+            Msg::StatusScanMatchedBoth,
+            &tool_version(node).unwrap_or_else(|| format!("v{DEFAULT_NODE_VERSION}")),
         ),
-        (Some(node), None) => format!(
-            "已匹配本机 Node {}，将仅安装 pnpm",
-            tool_version(node).unwrap_or_else(|| format!("v{DEFAULT_NODE_VERSION}"))
+        (Some(node), None) => i18n::tf(
+            Msg::StatusScanMatchedNode,
+            &tool_version(node).unwrap_or_else(|| format!("v{DEFAULT_NODE_VERSION}")),
         ),
-        (None, Some(_)) => "未找到兼容 Node，将下载运行时并复用本机 pnpm".into(),
-        (None, None) => "未找到兼容 Node / pnpm，将从镜像下载".into(),
+        (None, Some(_)) => i18n::t(Msg::StatusScanMissingNode).into(),
+        (None, None) => i18n::t(Msg::StatusScanMissingBoth).into(),
     }
 }
 
@@ -108,9 +107,7 @@ fn first_compatible_node(candidates: Vec<PathBuf>) -> Option<PathBuf> {
 }
 
 fn first_usable_pnpm(candidates: Vec<PathBuf>) -> Option<PathBuf> {
-    candidates
-        .into_iter()
-        .find(|path| pnpm_binary_usable(path))
+    candidates.into_iter().find(|path| pnpm_binary_usable(path))
 }
 
 fn node_candidates(preferred: &Path) -> Vec<PathBuf> {
@@ -154,8 +151,15 @@ fn well_known_node_paths() -> Vec<PathBuf> {
         push_env_join(&mut paths, "NVM_SYMLINK", &["node.exe"]);
         push_env_join(&mut paths, "NVM_HOME", &["node.exe"]);
         push_home_join(&mut paths, &[".volta", "bin", "node.exe"]);
-        push_home_join(&mut paths, &["scoop", "apps", "nodejs", "current", "node.exe"]);
-        push_env_join(&mut paths, "LOCALAPPDATA", &["fnm", "aliases", "default", "node.exe"]);
+        push_home_join(
+            &mut paths,
+            &["scoop", "apps", "nodejs", "current", "node.exe"],
+        );
+        push_env_join(
+            &mut paths,
+            "LOCALAPPDATA",
+            &["fnm", "aliases", "default", "node.exe"],
+        );
     }
     #[cfg(not(windows))]
     {
@@ -222,13 +226,17 @@ fn dedup_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{node_version_compatible, parse_semver, pnpm_binary_usable, toolchain_status, HostToolchain};
+    use super::{
+        node_version_compatible, parse_semver, pnpm_binary_usable, toolchain_status, HostToolchain,
+    };
     use std::path::PathBuf;
 
     #[cfg(windows)]
     #[test]
     fn rejects_a_powershell_pnpm_shim_as_unusable() {
-        assert!(!pnpm_binary_usable(PathBuf::from(r"C:\Users\me\AppData\Roaming\npm\pnpm.ps1").as_path()));
+        assert!(!pnpm_binary_usable(
+            PathBuf::from(r"C:\Users\me\AppData\Roaming\npm\pnpm.ps1").as_path()
+        ));
     }
 
     #[test]

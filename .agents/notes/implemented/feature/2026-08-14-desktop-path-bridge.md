@@ -16,7 +16,7 @@ On Windows those lookups are stricter than a user terminal. Node `spawn('dsh')` 
 
 - `dsh.cmd` (and a Unix `dsh` script) that prepend the selected Node and pnpm directories onto `PATH`, then exec the selected Node and `apps/cli/lib/bin.js`
 - `dsh-launch.json` naming that Node, CLI entry, `$DSH_HOME`, and the same `pathPrepend` directories
-- `dsh.exe` — a hard link or copy of the desktop binary; when `argv0` is `dsh`, the process attaches a visible parent console when one exists, applies the sidecar's `pathPrepend` to `PATH`, and execs the sidecar Node with `CREATE_NO_WINDOW` when that console is missing or hidden, instead of opening the GUI
+- `dsh.exe` — a hard link or copy of the desktop binary, refreshed only when it is missing, a different size, or older than that binary; when `argv0` is `dsh`, the process attaches a visible parent console when one exists, applies the sidecar's `pathPrepend` to `PATH`, and execs the sidecar Node with `CREATE_NO_WINDOW` when that console is missing or hidden, instead of opening the GUI
 - `pnpm.cmd` (Unix `pnpm`) that runs `node …/pnpm.cjs` when that file sits next to the selected pnpm, otherwise `call`s a `.cmd` / `.bat` or execs the selected binary
 
 Every `dsh` entry point therefore resolves the provisioned pnpm first, so `dsh plugin` from any terminal uses the same pnpm major as the desktop and one profile stays on one pnpm store; a sidecar from an older build without `pathPrepend` parses with an empty prepend and behaves as before.

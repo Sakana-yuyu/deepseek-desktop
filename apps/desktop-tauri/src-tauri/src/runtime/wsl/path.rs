@@ -122,8 +122,7 @@ mod tests {
 
     #[test]
     fn rejects_wsl_localhost_unc() {
-        let err =
-            windows_to_wsl_mount(Path::new(r"\\wsl.localhost\Ubuntu\home\me")).unwrap_err();
+        let err = windows_to_wsl_mount(Path::new(r"\\wsl.localhost\Ubuntu\home\me")).unwrap_err();
         assert!(err.contains("UNC"));
     }
 

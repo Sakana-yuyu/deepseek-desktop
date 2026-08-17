@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use super::boot_log;
 use super::env_path::{durable_dsh_home, path_eq};
+use crate::i18n::{self, tf, tf2, Msg};
 
 const HOME_DIR_NAME: &str = ".dsh";
 const SKIP_IMPORT: &[&str] = &["desktop-overlay", "node_modules"];
@@ -91,14 +92,14 @@ fn adopt_homes(isolated: &Path, homes: Vec<PathBuf>) -> Result<ResolvedUserHome,
 /// Splash line after home matching.
 pub fn user_home_status(resolved: &ResolvedUserHome, isolated: &Path) -> String {
     if resolved.path == isolated && resolved.imported == 0 {
-        "未发现已有对话，将使用桌面端主目录".into()
+        i18n::t(Msg::StatusHomeNone).into()
     } else if resolved.imported == 0 {
-        format!("已匹配已有主目录 {}", display_home(&resolved.path))
+        tf(Msg::StatusHomeMatched, &display_home(&resolved.path))
     } else {
-        format!(
-            "已恢复 {} 项历史数据到 {}",
-            resolved.imported,
-            display_home(&resolved.path)
+        tf2(
+            Msg::StatusHomeRestored,
+            &resolved.imported.to_string(),
+            &display_home(&resolved.path),
         )
     }
 }
@@ -228,7 +229,9 @@ pub fn profile_dependencies_unresolved(profile: &Path) -> bool {
     let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&raw) else {
         return false;
     };
-    let Some(dependencies) = manifest.get("dependencies").and_then(|value| value.as_object())
+    let Some(dependencies) = manifest
+        .get("dependencies")
+        .and_then(|value| value.as_object())
     else {
         return false;
     };
@@ -308,7 +311,9 @@ fn is_reparse_meta(meta: &fs::Metadata) -> bool {
 fn unlink_reparse(path: &Path) -> Result<(), String> {
     match fs::remove_dir(path) {
         Ok(()) => Ok(()),
-        Err(_) => fs::remove_file(path).map_err(|e| format!("无法删除链接 {}: {e}", path.display())),
+        Err(_) => {
+            fs::remove_file(path).map_err(|e| format!("无法删除链接 {}: {e}", path.display()))
+        }
     }
 }
 
@@ -348,7 +353,8 @@ fn import_entry(from: &Path, to: &Path) -> Result<usize, String> {
             return Ok(1);
         }
         let mut copied = 0usize;
-        for entry in fs::read_dir(from).map_err(|e| format!("无法读取 {}: {e}", from.display()))? {
+        for entry in fs::read_dir(from).map_err(|e| format!("无法读取 {}: {e}", from.display()))?
+        {
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(error) => {
@@ -373,7 +379,8 @@ fn import_entry(from: &Path, to: &Path) -> Result<usize, String> {
     if let Some(parent) = to.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("无法创建 {}: {e}", parent.display()))?;
     }
-    fs::copy(from, to).map_err(|e| format!("无法复制 {} -> {}: {e}", from.display(), to.display()))?;
+    fs::copy(from, to)
+        .map_err(|e| format!("无法复制 {} -> {}: {e}", from.display(), to.display()))?;
     Ok(1)
 }
 
@@ -383,7 +390,8 @@ fn copy_tree(source: &Path, dest: &Path) -> Result<(), String> {
     }
     if source.is_file() {
         if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("无法创建 {}: {e}", parent.display()))?;
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("无法创建 {}: {e}", parent.display()))?;
         }
         fs::copy(source, dest)
             .map_err(|e| format!("无法复制 {} -> {}: {e}", source.display(), dest.display()))?;
@@ -391,7 +399,8 @@ fn copy_tree(source: &Path, dest: &Path) -> Result<(), String> {
     }
 
     fs::create_dir_all(dest).map_err(|e| format!("无法创建 {}: {e}", dest.display()))?;
-    for entry in fs::read_dir(source).map_err(|e| format!("无法读取 {}: {e}", source.display()))? {
+    for entry in fs::read_dir(source).map_err(|e| format!("无法读取 {}: {e}", source.display()))?
+    {
         let entry = match entry {
             Ok(entry) => entry,
             Err(error) => {
@@ -449,7 +458,11 @@ mod tests {
     fn empty_directory_is_not_a_harness_home() {
         let root = temp_root();
         assert!(!is_harness_home(&root));
-        fs::write(root.join(".credentials.yaml"), "DEEPSEEK_API_KEY: sk-test\n").unwrap();
+        fs::write(
+            root.join(".credentials.yaml"),
+            "DEEPSEEK_API_KEY: sk-test\n",
+        )
+        .unwrap();
         assert!(is_harness_home(&root));
         let _ = fs::remove_dir_all(&root);
     }
@@ -464,7 +477,11 @@ mod tests {
         fs::write(from.join(".credentials.yaml"), "from: cli\n").unwrap();
         fs::write(from.join(".env"), "DEEPSEEK_API_KEY=cli\n").unwrap();
         fs::create_dir_all(to.join("sessions").join("old")).unwrap();
-        fs::write(to.join("sessions").join("old").join("log.jsonl"), "desktop\n").unwrap();
+        fs::write(
+            to.join("sessions").join("old").join("log.jsonl"),
+            "desktop\n",
+        )
+        .unwrap();
         fs::write(to.join(".credentials.yaml"), "from: desktop\n").unwrap();
 
         let copied = import_missing(&from, &to).unwrap();
@@ -507,12 +524,19 @@ mod tests {
         let to = root.join("desktop");
         fs::create_dir_all(from.join("profiles").join("node_modules").join("left-pad")).unwrap();
         fs::write(
-            from.join("profiles").join("node_modules").join("left-pad").join("index.js"),
+            from.join("profiles")
+                .join("node_modules")
+                .join("left-pad")
+                .join("index.js"),
             "stolen\n",
         )
         .unwrap();
         fs::create_dir_all(from.join("sessions").join("keep")).unwrap();
-        fs::write(from.join("sessions").join("keep").join("log.jsonl"), "cli\n").unwrap();
+        fs::write(
+            from.join("sessions").join("keep").join("log.jsonl"),
+            "cli\n",
+        )
+        .unwrap();
         fs::create_dir_all(&to).unwrap();
 
         let copied = import_missing(&from, &to).unwrap();
@@ -531,12 +555,19 @@ mod tests {
         fs::write(cli.join(".credentials.yaml"), "DEEPSEEK_API_KEY: cli\n").unwrap();
         fs::create_dir_all(cli.join("profiles").join("node_modules").join("junk")).unwrap();
         fs::write(
-            cli.join("profiles").join("node_modules").join("junk").join("x.js"),
+            cli.join("profiles")
+                .join("node_modules")
+                .join("junk")
+                .join("x.js"),
             "stolen\n",
         )
         .unwrap();
         fs::create_dir_all(cli.join("profiles").join("web")).unwrap();
-        fs::write(cli.join("profiles").join("web").join("cordis.yml"), "name: web\n").unwrap();
+        fs::write(
+            cli.join("profiles").join("web").join("cordis.yml"),
+            "name: web\n",
+        )
+        .unwrap();
         fs::create_dir_all(&isolated).unwrap();
 
         let resolved = adopt_homes(&isolated, vec![cli.clone()]).unwrap();
@@ -564,7 +595,13 @@ mod tests {
         fs::write(home.join(".credentials.yaml"), "k: v\n").unwrap();
         let link = home.join("profiles").join("node_modules").join("pkg");
         let status = std::process::Command::new("cmd")
-            .args(["/C", "mklink", "/J", &link.display().to_string(), &target.display().to_string()])
+            .args([
+                "/C",
+                "mklink",
+                "/J",
+                &link.display().to_string(),
+                &target.display().to_string(),
+            ])
             .status()
             .unwrap();
         assert!(status.success());
@@ -572,7 +609,10 @@ mod tests {
 
         let _ = adopt_homes(&isolated, vec![home.clone()]).unwrap();
         assert!(!home.join("profiles").join("node_modules").exists());
-        assert_eq!(fs::read_to_string(target.join("keep.txt")).unwrap(), "target\n");
+        assert_eq!(
+            fs::read_to_string(target.join("keep.txt")).unwrap(),
+            "target\n"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -589,7 +629,9 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            web.join("node_modules").join("dsh-plugins-catalog").join("package.json"),
+            web.join("node_modules")
+                .join("dsh-plugins-catalog")
+                .join("package.json"),
             r#"{"name":"dsh-plugins-catalog","version":"0.2.0"}"#,
         )
         .unwrap();
@@ -597,7 +639,11 @@ mod tests {
 
         let resolved = adopt_homes(&isolated, vec![cli.clone()]).unwrap();
         assert_eq!(resolved.path, cli);
-        assert!(web.join("node_modules").join("dsh-plugins-catalog").join("package.json").is_file());
+        assert!(web
+            .join("node_modules")
+            .join("dsh-plugins-catalog")
+            .join("package.json")
+            .is_file());
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -614,7 +660,9 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            web.join("node_modules").join("dsh-plugins-catalog").join("package.json"),
+            web.join("node_modules")
+                .join("dsh-plugins-catalog")
+                .join("package.json"),
             r#"{"name":"dsh-plugins-catalog","version":"0.2.0"}"#,
         )
         .unwrap();
@@ -663,7 +711,10 @@ mod tests {
         fs::write(cli.join(".credentials.yaml"), "DEEPSEEK_API_KEY: cli\n").unwrap();
         fs::create_dir_all(isolated.join("sessions").join("from-desktop")).unwrap();
         fs::write(
-            isolated.join("sessions").join("from-desktop").join("log.jsonl"),
+            isolated
+                .join("sessions")
+                .join("from-desktop")
+                .join("log.jsonl"),
             "desktop\n",
         )
         .unwrap();

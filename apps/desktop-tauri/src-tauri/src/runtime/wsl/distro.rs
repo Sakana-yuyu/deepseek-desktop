@@ -1,10 +1,6 @@
 //! Parse `wsl.exe -l -v` output and select an eligible WSL2 distro.
 
-const MSG_MISSING_WSL: &str = "未检测到 WSL。请安装 WSL2 后再将运行环境设为 WSL。";
-const MSG_WSL1_ONLY: &str = "当前发行版是 WSL1。请执行 wsl --set-version <发行版> 2。";
-const MSG_DOCKER_DEFAULT: &str =
-    "默认 WSL 发行版是 Docker。请执行 wsl --set-default <Ubuntu 发行版名>。";
-const MSG_NONE_ELIGIBLE: &str = "没有可用的 WSL2 发行版（已跳过 docker-desktop）。";
+use crate::i18n::{self, Msg};
 
 /// One row from `wsl.exe -l -v`.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -25,7 +21,7 @@ pub enum WslSelectError {
 }
 
 impl WslSelectError {
-    /// Chinese splash text for this selection failure.
+    /// Localized splash text for this selection failure.
     pub fn splash_message(&self) -> &str {
         match self {
             Self::MissingWsl(message)
@@ -38,28 +34,26 @@ impl WslSelectError {
 
     /// Splash when `wsl.exe` is missing from PATH.
     pub fn missing_wsl() -> Self {
-        Self::MissingWsl(MSG_MISSING_WSL.to_string())
+        Self::MissingWsl(i18n::t(Msg::WslMissing).to_string())
     }
 
     fn wsl1_only() -> Self {
-        Self::Wsl1Only(MSG_WSL1_ONLY.to_string())
+        Self::Wsl1Only(i18n::t(Msg::Wsl1Only).to_string())
     }
 
     fn docker_default() -> Self {
-        Self::DockerDefault(MSG_DOCKER_DEFAULT.to_string())
+        Self::DockerDefault(i18n::t(Msg::WslDockerDefault).to_string())
     }
 
     fn named_missing(requested: &str) -> Self {
         Self::NamedMissing {
             requested: requested.to_string(),
-            message: format!(
-                "找不到 WSL 发行版 {requested}。请检查 desktop-settings.json 的 wslDistro。"
-            ),
+            message: i18n::tf(Msg::WslNamedMissing, requested),
         }
     }
 
     fn none_eligible() -> Self {
-        Self::NoneEligible(MSG_NONE_ELIGIBLE.to_string())
+        Self::NoneEligible(i18n::t(Msg::WslNoneEligible).to_string())
     }
 }
 
@@ -278,7 +272,8 @@ mod tests {
 
     #[test]
     fn decodes_utf8_list() {
-        let raw = b"  NAME              STATE           VERSION\n* Ubuntu            Running         2\n";
+        let raw =
+            b"  NAME              STATE           VERSION\n* Ubuntu            Running         2\n";
         let text = decode_wsl_list_stdout(raw);
         let list = parse_wsl_list(&text);
         let selected = select_distro(&list, None).unwrap();

@@ -4,6 +4,7 @@ use tauri::AppHandle;
 use tauri_plugin_updater::UpdaterExt;
 
 use crate::chrome;
+use crate::i18n::{self, Msg};
 use crate::runtime::ProvisionEvent;
 
 /// Install a signed desktop update before provisioning the bundled Harness tree.
@@ -15,7 +16,9 @@ pub async fn install_available(
         return Ok(());
     }
 
-    progress(ProvisionEvent::Status("正在检查桌面更新…".into()));
+    progress(ProvisionEvent::Status(
+        i18n::t(Msg::StatusCheckUpdate).into(),
+    ));
     let Some(update) = app
         .updater()
         .map_err(|error| error.to_string())?
@@ -26,9 +29,9 @@ pub async fn install_available(
         return Ok(());
     };
 
-    progress(ProvisionEvent::Status(format!(
-        "正在下载桌面更新 {}…",
-        update.version
+    progress(ProvisionEvent::Status(i18n::tf(
+        Msg::StatusDownloadUpdate,
+        &update.version,
     )));
     let progress_for_download = Arc::clone(&progress);
     let mut downloaded = 0_u64;
@@ -47,14 +50,13 @@ pub async fn install_available(
         .await
         .map_err(|error| error.to_string())?;
 
-    chrome::stop_host(app);
-    app.restart();
+    chrome::request_restart(app);
 }
 
 /// Check for a signed update from the tray. Debug builds skip the network.
 pub async fn check_now(app: &AppHandle) -> Result<String, String> {
     if cfg!(debug_assertions) {
-        return Ok("开发构建不检查桌面更新".into());
+        return Ok(i18n::t(Msg::UpdaterDevSkip).into());
     }
 
     let Some(update) = app
@@ -64,13 +66,12 @@ pub async fn check_now(app: &AppHandle) -> Result<String, String> {
         .await
         .map_err(|error| error.to_string())?
     else {
-        return Ok("当前已是最新版本".into());
+        return Ok(i18n::t(Msg::UpdaterCurrent).into());
     };
 
     update
         .download_and_install(|_, _| {}, || {})
         .await
         .map_err(|error| error.to_string())?;
-    chrome::stop_host(app);
-    app.restart()
+    chrome::request_restart(app)
 }

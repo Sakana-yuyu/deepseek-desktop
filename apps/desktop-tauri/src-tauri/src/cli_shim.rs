@@ -80,12 +80,8 @@ pub fn run() -> i32 {
 
 /// Parse a launch sidecar; used by the trampoline and by PATH-bridge tests.
 pub fn read_launch_spec(path: &Path) -> Result<DshLaunchSpec, String> {
-    let raw = std::fs::read_to_string(path).map_err(|e| {
-        format!(
-            "missing launch sidecar {} ({e})",
-            path.display()
-        )
-    })?;
+    let raw = std::fs::read_to_string(path)
+        .map_err(|e| format!("missing launch sidecar {} ({e})", path.display()))?;
     serde_json::from_str(&raw).map_err(|e| format!("invalid {}: {e}", path.display()))
 }
 
@@ -95,7 +91,9 @@ pub fn read_launch_spec(path: &Path) -> Result<DshLaunchSpec, String> {
 fn attach_visible_parent_console() -> bool {
     #[cfg(windows)]
     {
-        use windows::Win32::System::Console::{AttachConsole, GetConsoleWindow, ATTACH_PARENT_PROCESS};
+        use windows::Win32::System::Console::{
+            AttachConsole, GetConsoleWindow, ATTACH_PARENT_PROCESS,
+        };
         use windows::Win32::UI::WindowsAndMessaging::IsWindowVisible;
         if unsafe { AttachConsole(ATTACH_PARENT_PROCESS) }.is_err() {
             return false;
@@ -185,7 +183,10 @@ mod tests {
             r#"{"node":"C:\\node.exe","cli":"C:\\bin.js","dshHome":"C:\\.dsh"}"#,
         )
         .unwrap();
-        assert_eq!(read_launch_spec(&path).unwrap().path_prepend, Vec::<String>::new());
+        assert_eq!(
+            read_launch_spec(&path).unwrap().path_prepend,
+            Vec::<String>::new()
+        );
         let _ = fs::remove_file(&path);
     }
 }

@@ -1,6 +1,7 @@
 mod chrome;
 mod cli_shim;
 mod desktop_settings;
+mod i18n;
 mod notify;
 mod overlay;
 mod runtime;
@@ -9,6 +10,7 @@ mod updater;
 mod window_layout;
 
 use desktop_settings::AgentEnvironment;
+use i18n::Msg;
 use runtime::boot_log;
 use runtime::config::BUNDLED_HARNESS_DIR;
 use runtime::io_fallback::is_recoverable_io;
@@ -37,7 +39,10 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             chrome::show_main(app);
         }))
-        .invoke_handler(tauri::generate_handler![chrome::set_close_action])
+        .invoke_handler(tauri::generate_handler![
+            chrome::set_close_action,
+            chrome::restart_app
+        ])
         .setup(|app| {
             let handle = app.handle().clone();
             let icon = app
@@ -48,6 +53,14 @@ pub fn run() {
                 splash.set_icon(icon)?;
                 let _ = splash.set_background_color(Some(SPLASH_BG));
                 let _ = splash.center();
+                let locale = match i18n::current() {
+                    i18n::Locale::Zh => "zh",
+                    i18n::Locale::En => "en",
+                };
+                let _ = splash.eval(&format!(
+                    "window.__DSH_LOCALE__={};window.DSH_I18N&&window.DSH_I18N.apply();",
+                    json_string(locale)
+                ));
             }
             tray::install(&handle)?;
             let bundled = resolve_bundled_source(&handle);
@@ -62,18 +75,16 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
-            match event {
-                RunEvent::ExitRequested { api, .. } => {
-                    if !chrome::quit_requested() {
-                        api.prevent_exit();
-                    } else {
-                        chrome::stop_host(app);
-                    }
+        .run(|app, event| match event {
+            RunEvent::ExitRequested { api, .. } => {
+                if !chrome::quit_requested() {
+                    api.prevent_exit();
+                } else {
+                    chrome::stop_host(app);
                 }
-                RunEvent::Exit => chrome::stop_host(app),
-                _ => {}
             }
+            RunEvent::Exit => chrome::stop_host(app),
+            _ => {}
         });
 }
 
@@ -124,11 +135,18 @@ async fn boot_app(app: AppHandle, bundled: Option<PathBuf>) -> Result<(), String
     let settings = desktop_settings::load();
     let runtime = match boot_kind(&settings) {
         AgentEnvironment::Windows => {
-            boot_windows_runtime(app.clone(), bundled, notify.as_ref(), Arc::clone(&progress)).await?
+            boot_windows_runtime(app.clone(), bundled, notify.as_ref(), Arc::clone(&progress))
+                .await?
         }
         AgentEnvironment::Wsl => {
-            boot_wsl_runtime(app.clone(), bundled, &settings, notify.as_ref(), Arc::clone(&progress))
-                .await?
+            boot_wsl_runtime(
+                app.clone(),
+                bundled,
+                &settings,
+                notify.as_ref(),
+                Arc::clone(&progress),
+            )
+            .await?
         }
     };
 
@@ -139,7 +157,7 @@ async fn boot_app(app: AppHandle, bundled: Option<PathBuf>) -> Result<(), String
         notify::toast(
             &app,
             "DeepSeek Harness",
-            &format!("以下插件已损坏，本次启动已自动禁用：{names}。修复或更新插件后重启即可恢复。"),
+            &i18n::tf(Msg::PluginsDisabled, &names),
         );
     }
     app.manage(runtime);
@@ -177,18 +195,14 @@ async fn boot_windows_runtime(
         Err(error) => {
             boot_log::error(&format!("provision failed: {error}"));
             if let Some(paths) = try_recover_paths(bundled.as_deref()) {
-                progress(ProvisionEvent::Status(
-                    if is_recoverable_io(&error) {
-                        "预配遇到占用或权限问题，改用已有运行时…".into()
-                    } else {
-                        "预配未完成，改用已有运行时…".into()
-                    },
-                ));
+                progress(ProvisionEvent::Status(if is_recoverable_io(&error) {
+                    i18n::t(Msg::BootRecoverIo).into()
+                } else {
+                    i18n::t(Msg::BootRecoverGeneric).into()
+                }));
                 paths
             } else if is_recoverable_io(&error) {
-                return Err(
-                    "启动遇到占用或权限问题，未能找到可用运行时。详见 boot.log。".into(),
-                );
+                return Err(i18n::t(Msg::BootRecoverFailed).into());
             } else {
                 return Err(error);
             }
@@ -219,7 +233,7 @@ async fn boot_wsl_runtime(
     notify: Option<&notify::NotifyHandle>,
     progress: Arc<dyn Fn(ProvisionEvent) + Send + Sync>,
 ) -> Result<DesktopRuntime, String> {
-    progress(ProvisionEvent::Status("正在检测 WSL…".into()));
+    progress(ProvisionEvent::Status(i18n::t(Msg::StatusDetectWsl).into()));
     let runner = SystemWslRunner;
     let list_out = runner
         .run(&["-l", "-v"])
@@ -229,9 +243,7 @@ async fn boot_wsl_runtime(
     let distro = select_distro(&distros, settings.wsl_distro.as_deref())
         .map_err(|error| error.splash_message().to_string())?;
 
-    let bundled = bundled.ok_or_else(|| {
-        "安装包内缺少 harness 源码资源；请重新构建 desktop-tauri".to_string()
-    })?;
+    let bundled = bundled.ok_or_else(|| i18n::t(Msg::BootMissingBundle).to_string())?;
     let bundle_hash = read_bundle_hash(&bundled)?;
     let isolated_home = app_data_root()?.join("dsh-home");
     let windows_dsh_home = resolve_user_home(&isolated_home).path;
@@ -261,9 +273,9 @@ async fn boot_wsl_runtime(
         notify_url: server.url.clone(),
     });
 
-    progress(ProvisionEvent::Status("正在启动 Web 界面…".into()));
+    progress(ProvisionEvent::Status(i18n::t(Msg::StatusStartWeb).into()));
     let host = spawn_wsl_web_host(&wsl_paths, host_overlay.as_ref(), &runner).await?;
-    Ok(DesktopRuntime::start_wsl(host))
+    Ok(DesktopRuntime::start_wsl(host, wsl_paths))
 }
 
 fn splash_eval(app: &AppHandle, script: &str) -> Result<(), String> {

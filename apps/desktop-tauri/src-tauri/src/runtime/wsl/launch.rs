@@ -1,6 +1,17 @@
 //! Build `wsl.exe` argv for `dsh web` without executing Windows `node.exe`.
 
-const ERR_WINDOWS_NODE: &str = "禁止在 WSL 中执行 Windows node.exe";
+use crate::i18n::{self, Msg};
+
+fn err_windows_node() -> &'static str {
+    i18n::t(Msg::WslNoWindowsNode)
+}
+
+pub(crate) fn reject_windows_node(linux_node: &str) -> Result<(), String> {
+    if linux_node.contains('\\') || linux_node.to_ascii_lowercase().ends_with("node.exe") {
+        return Err(err_windows_node().into());
+    }
+    Ok(())
+}
 
 /// Inputs for one WSL Host `dsh web` launch.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -26,14 +37,7 @@ pub struct WslCommand {
 
 /// Build `wsl.exe` argv for `dsh web` inside the selected distro.
 pub fn build_wsl_web_command(spec: &WslLaunchSpec) -> Result<WslCommand, String> {
-    if spec.linux_node.contains('\\')
-        || spec
-            .linux_node
-            .to_ascii_lowercase()
-            .ends_with("node.exe")
-    {
-        return Err(ERR_WINDOWS_NODE.into());
-    }
+    reject_windows_node(&spec.linux_node)?;
 
     let mut args = vec![
         "-d".into(),
@@ -117,8 +121,7 @@ mod tests {
             r#"echo $$ >&2; exec "$@""#.to_string(),
             "sh".to_string(),
             "/home/u/.local/share/dsh-desktop/runtime/node/bin/node".to_string(),
-            "/home/u/.local/share/dsh-desktop/harness-versions/abc/apps/cli/lib/bin.js"
-                .to_string(),
+            "/home/u/.local/share/dsh-desktop/harness-versions/abc/apps/cli/lib/bin.js".to_string(),
             "web".to_string(),
             "--patch".to_string(),
             "/home/u/.dsh/desktop-overlay/cordis.yml".to_string(),

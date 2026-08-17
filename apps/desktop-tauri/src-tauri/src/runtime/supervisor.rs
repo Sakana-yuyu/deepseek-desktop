@@ -12,6 +12,7 @@ use super::process::{
 };
 use super::provision::RuntimePaths;
 use super::wsl::{build_wsl_web_command, WslLaunchSpec, WslRunner, WslRuntimePaths};
+use crate::i18n::{self, Msg};
 
 /// Maximum broken plugins one boot disables before giving up on the Host.
 const MAX_PLUGIN_RESCUES: usize = 4;
@@ -44,11 +45,7 @@ impl HostHandle {
     /// Stop the Host Node tree. Safe to call more than once, including before
     /// `app.exit` / `app.restart`, which do not run `Drop`.
     pub fn stop(&self) {
-        let session = self
-            .wsl
-            .lock()
-            .ok()
-            .and_then(|mut guard| guard.take());
+        let session = self.wsl.lock().ok().and_then(|mut guard| guard.take());
         if let Some(session) = session {
             stop_wsl_linux_host(&session);
         }
@@ -166,9 +163,7 @@ pub async fn spawn_web_host(
             }
             let _ = std::fs::remove_file(host_pid_path());
             last_error = error.clone();
-            match failing_loader_entry(&error)
-                .filter(|entry| !disabled_plugins.contains(entry))
-            {
+            match failing_loader_entry(&error).filter(|entry| !disabled_plugins.contains(entry)) {
                 Some(entry) => {
                     boot_log::error(&format!(
                         "plugin {entry} failed to load; retrying with it disabled"
@@ -240,11 +235,7 @@ pub async fn spawn_wsl_web_host(
         }
     };
 
-    if let Err(error) = write_host_pid(
-        &host_pid_path(),
-        stub_pid,
-        Path::new(&paths.linux_node),
-    ) {
+    if let Err(error) = write_host_pid(&host_pid_path(), stub_pid, Path::new(&paths.linux_node)) {
         boot_log::info(&format!("host pid file skipped: {error}"));
     }
 
@@ -260,7 +251,7 @@ pub async fn spawn_wsl_web_host(
         distro: paths.distro.clone(),
         linux_pid,
     };
-    let wsl_timeout = "请检查 WSL 的 localhost 转发（localhostForwarding）。";
+    let wsl_timeout = i18n::t(Msg::WslWaitForwarding);
     if let Err(error) = wait_for_http(
         &web_url,
         &child_handle,
@@ -357,9 +348,7 @@ fn run_wsl_argv(args: &[String]) -> Result<i32, String> {
     let mut cmd = Command::new("wsl.exe");
     cmd.args(args);
     hide_console(&mut cmd);
-    let status = cmd
-        .status()
-        .map_err(|e| format!("无法执行 wsl.exe: {e}"))?;
+    let status = cmd.status().map_err(|e| format!("无法执行 wsl.exe: {e}"))?;
     Ok(status.code().unwrap_or(-1))
 }
 
@@ -460,9 +449,7 @@ fn read_linux_pid_handshake<R: std::io::Read + Send + 'static>(
             } else {
                 preview
             };
-            let _ = tx.send(Err(format!(
-                "无法解析 WSL Host pid（handshake）: {detail}"
-            )));
+            let _ = tx.send(Err(format!("无法解析 WSL Host pid（handshake）: {detail}")));
         }
     });
 
@@ -732,9 +719,6 @@ invalid plugin, expect function or object with an \"apply\" method, received obj
         }
         let lines = Arc::new(Mutex::new(Vec::new()));
         let err = read_linux_pid_handshake(Stall, lines, Duration::from_millis(200)).unwrap_err();
-        assert!(
-            err.contains("超时"),
-            "expected timeout error, got: {err}"
-        );
+        assert!(err.contains("超时"), "expected timeout error, got: {err}");
     }
 }

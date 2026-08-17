@@ -15,7 +15,7 @@ Current desktop release: **0.1.0-rc.5-0.5**.
 | **Dependencies** | — | `pnpm install --prod --no-frozen-lockfile` in the platform application-data directory (trimmed bundle vs lockfile; `CI` unset so pnpm does not force frozen install) |
 | **Host** | — | `node apps/cli/lib/bin.js web --host 127.0.0.1`; a loader plugin that fails at start is disabled and the Host is retried |
 | **UI** | Local `shell.html` title bar | Frameless window embeds `dsh web`; splash is a compact transparent window with a borderless radial frost, the official fish mark, DeepSeek wordmark, and a progress bar; the first close is an in-window light modal matching the web client; Windows controls on the right, macOS on the left, Linux from the window-manager button layout |
-| **Tray** | Native tray icon | First close asks minimize-to-tray vs quit and remembers the answer in `desktop-settings.json`; tray can change that later, show the window, check for updates, or quit. Quit stops the Host Node process tree; minimize-to-tray leaves it running |
+| **Tray** | Native tray icon | First close asks minimize-to-tray vs quit and remembers the answer in `desktop-settings.json`; tray can change that later, show the window, install the Sakana plugin catalog (`dsh plugin --profile web add github:Sakana-yuyu/dsh-plugins` into the live Host home), check for updates, restart, or quit. Restart and Quit stop the Host Node process tree; Restart then relaunches the desktop process. A successful catalog install restarts the same way so the catalog loads. Minimize-to-tray leaves the Host running |
 | **Notify** | Overlay plugin + localhost POST | `turn/end` with `completed` shows a toast and plays `sounds/complete.wav` when the window is unfocused |
 | **Updates** | Embedded updater public key | Check the stable GitHub update manifest, verify the downloaded artifact signature, install, and restart |
 | **Agent environment** | Windows (default) or WSL | Tray sets `desktop-settings.json`; WSL starts Linux `dsh web` in the default WSL2 distro; restart required |
@@ -63,7 +63,7 @@ pnpm run build:win
 
 Installer output: `src-tauri/target/release/bundle/nsis/DeepSeek Harness_0.1.0-rc.5-0.5_x64-setup.exe`
 
-The NSIS installer bundles **English**, **Simplified Chinese**, and **Traditional Chinese**. Language follows the OS locale automatically (no language picker); if the locale is unsupported, English is used. Before copying files, the installer silently closes `dsh-desktop.exe` and its child process tree. After installation, it recreates an existing desktop shortcut with the versioned standalone ICO resource and notifies Explorer to invalidate stale icon cache entries.
+The NSIS installer bundles **English**, **Simplified Chinese**, and **Traditional Chinese**. Language follows the OS locale automatically (no language picker); if the locale is unsupported, English is used. Native splash, tray, close-dialog, and splash-status copy follow the same rule (`zh*` → Chinese, otherwise English). The embedded `dsh web` client keeps its own Settings language. Before copying files, the installer silently closes `dsh-desktop.exe` and its child process tree. After installation, it recreates an existing desktop shortcut with the versioned standalone ICO resource and notifies Explorer to invalidate stale icon cache entries.
 
 ## Release
 

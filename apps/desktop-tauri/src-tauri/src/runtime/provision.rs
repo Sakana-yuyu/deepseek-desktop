@@ -17,10 +17,11 @@ use super::config::{
 use super::host_env::{
     node_binary_compatible, pnpm_binary_usable, scan_host_toolchain, toolchain_status,
 };
-use super::process::hide_console;
 use super::io_fallback::{is_recoverable_io, recoverable_message};
+use super::process::hide_console;
 use super::user_home::{resolve_user_home, user_home_status};
 use super::{app_data_root, ProvisionEvent};
+use crate::i18n::{self, Msg};
 
 /// Paths to the provisioned build environment and harness tree.
 #[derive(Clone, Debug)]
@@ -55,14 +56,13 @@ pub async fn ensure_runtime(
 ) -> Result<RuntimePaths, String> {
     if let Some(mode) = dev_launch_mode() {
         if mode == "local" || mode == "source" {
-            progress(ProvisionEvent::Status("使用本地仓库…".into()));
+            progress(ProvisionEvent::Status(i18n::t(Msg::StatusLocalRepo).into()));
             progress(ProvisionEvent::Progress(100));
             return resolve_local_repo();
         }
     }
 
-    let bundled = bundled_source
-        .ok_or_else(|| "安装包内缺少 harness 源码资源；请重新构建 desktop-tauri".to_string())?;
+    let bundled = bundled_source.ok_or_else(|| i18n::t(Msg::BootMissingBundle).to_string())?;
 
     let runtime_root = app_data_root()?.join("runtime");
     let node_dir = runtime_root.join("node");
@@ -81,7 +81,9 @@ pub async fn ensure_runtime(
         .join("lib")
         .join("bin.js");
 
-    progress(ProvisionEvent::Status("正在匹配已有对话与密钥…".into()));
+    progress(ProvisionEvent::Status(
+        i18n::t(Msg::StatusMatchingHome).into(),
+    ));
     progress(ProvisionEvent::Progress(8));
     let user_home = resolve_user_home(&isolated_home);
     let dsh_home = user_home.path.clone();
@@ -99,7 +101,9 @@ pub async fn ensure_runtime(
         &cli_entry,
     ) {
         boot_log::info("provision skipped: manifest ready");
-        progress(ProvisionEvent::Status("运行环境已就绪".into()));
+        progress(ProvisionEvent::Status(
+            i18n::t(Msg::StatusRuntimeReady).into(),
+        ));
         progress(ProvisionEvent::Progress(100));
         return Ok(RuntimePaths {
             node_binary: preferred_node,
@@ -111,7 +115,9 @@ pub async fn ensure_runtime(
         });
     }
 
-    progress(ProvisionEvent::Status("正在扫描本机 Node / pnpm…".into()));
+    progress(ProvisionEvent::Status(
+        i18n::t(Msg::StatusScanToolchain).into(),
+    ));
     progress(ProvisionEvent::Progress(3));
     let toolchain = scan_host_toolchain(&preferred_node, &preferred_pnpm);
     progress(ProvisionEvent::Status(toolchain_status(&toolchain)));
@@ -127,7 +133,9 @@ pub async fn ensure_runtime(
         boot_log::info(&recoverable_message("create home", &dsh_home, error));
     }
 
-    progress(ProvisionEvent::Status("正在释放 harness 源码…".into()));
+    progress(ProvisionEvent::Status(
+        i18n::t(Msg::StatusExtractHarness).into(),
+    ));
     progress(ProvisionEvent::Progress(12));
     let mut harness_root = harness_root;
     let mut cli_entry = cli_entry;
@@ -150,12 +158,14 @@ pub async fn ensure_runtime(
 
     if node_binary_compatible(&node_binary) {
         boot_log::info(&format!("reusing Node {}", node_binary.display()));
-        progress(ProvisionEvent::Status("已复用本机 Node，跳过下载".into()));
+        progress(ProvisionEvent::Status(
+            i18n::t(Msg::StatusReusedNode).into(),
+        ));
         progress(ProvisionEvent::Progress(30));
     } else {
-        progress(ProvisionEvent::Status(format!(
-            "正在从镜像下载 Node {}…",
-            DEFAULT_NODE_VERSION
+        progress(ProvisionEvent::Status(i18n::tf(
+            Msg::StatusDownloadNode,
+            DEFAULT_NODE_VERSION,
         )));
         progress(ProvisionEvent::Progress(15));
         if let Err(error) = fetch_node(&node_dir, DEFAULT_NODE_VERSION, &progress).await {
@@ -172,12 +182,14 @@ pub async fn ensure_runtime(
 
     if pnpm_binary_usable(&pnpm_binary) {
         boot_log::info(&format!("reusing pnpm {}", pnpm_binary.display()));
-        progress(ProvisionEvent::Status("已复用本机 pnpm".into()));
+        progress(ProvisionEvent::Status(
+            i18n::t(Msg::StatusReusedPnpm).into(),
+        ));
         progress(ProvisionEvent::Progress(40));
     } else {
-        progress(ProvisionEvent::Status(format!(
-            "正在安装 pnpm {}…",
-            DEFAULT_PNPM_VERSION
+        progress(ProvisionEvent::Status(i18n::tf(
+            Msg::StatusInstallPnpm,
+            DEFAULT_PNPM_VERSION,
         )));
         progress(ProvisionEvent::Progress(35));
         if let Err(error) = install_pnpm(&node_binary, &pnpm_home, DEFAULT_PNPM_VERSION) {
@@ -193,7 +205,7 @@ pub async fn ensure_runtime(
     }
 
     progress(ProvisionEvent::Status(
-        "正在从镜像安装依赖 (pnpm install --prod --no-frozen-lockfile)…".into(),
+        i18n::t(Msg::StatusInstallDeps).into(),
     ));
     progress(ProvisionEvent::Progress(50));
     if let Err(error) = pnpm_install_harness(&node_binary, &pnpm_binary, &harness_root) {
@@ -220,7 +232,9 @@ pub async fn ensure_runtime(
         boot_log::info(&format!("manifest write skipped: {error}"));
     }
 
-    progress(ProvisionEvent::Status("运行环境已就绪".into()));
+    progress(ProvisionEvent::Status(
+        i18n::t(Msg::StatusRuntimeReady).into(),
+    ));
     progress(ProvisionEvent::Progress(100));
 
     Ok(RuntimePaths {
@@ -280,9 +294,9 @@ fn resolve_local_repo() -> Result<RuntimePaths, String> {
     }
 
     let toolchain = scan_host_toolchain(Path::new("node"), Path::new("pnpm"));
-    let node_binary = toolchain.node.ok_or_else(|| {
-        "找不到兼容 Node；请安装 Node ^22.19 或 >=24，或设置 PATH".to_string()
-    })?;
+    let node_binary = toolchain
+        .node
+        .ok_or_else(|| "找不到兼容 Node；请安装 Node ^22.19 或 >=24，或设置 PATH".to_string())?;
     let pnpm_binary = toolchain.pnpm.unwrap_or_else(|| {
         #[cfg(windows)]
         {
@@ -355,12 +369,14 @@ pub fn try_recover_paths(bundled: Option<&Path>) -> Option<RuntimePaths> {
     let preferred_node = node_binary_path(&runtime_root.join("node"));
     let preferred_pnpm = pnpm_binary_path(&runtime_root.join("pnpm-global"));
     let toolchain = scan_host_toolchain(&preferred_node, &preferred_pnpm);
-    let node_binary = toolchain.node.filter(|path| path.is_file()).or_else(|| {
-        preferred_node.is_file().then_some(preferred_node)
-    })?;
-    let pnpm_binary = toolchain.pnpm.filter(|path| path.is_file()).or_else(|| {
-        preferred_pnpm.is_file().then_some(preferred_pnpm)
-    })?;
+    let node_binary = toolchain
+        .node
+        .filter(|path| path.is_file())
+        .or_else(|| preferred_node.is_file().then_some(preferred_node))?;
+    let pnpm_binary = toolchain
+        .pnpm
+        .filter(|path| path.is_file())
+        .or_else(|| preferred_pnpm.is_file().then_some(preferred_pnpm))?;
     let harness_root = bundled
         .and_then(|source| read_bundle_hash(source).ok())
         .map(|hash| harness_root_for_bundle(&app_root, &hash))
@@ -539,9 +555,8 @@ fn copy_tree(source: &Path, dest: &Path) -> Result<(), String> {
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).map_err(|e| recoverable_message("create", parent, e))?;
         }
-        fs::copy(source, dest).map_err(|e| {
-            format!("copy {} -> {}: {e}", source.display(), dest.display())
-        })?;
+        fs::copy(source, dest)
+            .map_err(|e| format!("copy {} -> {}: {e}", source.display(), dest.display()))?;
         return Ok(());
     }
 
@@ -791,12 +806,14 @@ fn install_pnpm(node_binary: &Path, pnpm_home: &Path, version: &str) -> Result<(
         cmd.status()
             .map_err(|e| format!("pnpm 安装启动失败: {e}"))?
     } else {
-        let npm = which::which("npm").or_else(|_| which::which("npm.cmd")).map_err(|_| {
-            format!(
-                "找不到 npm-cli.js 或 npm，无法通过 {} 安装 pnpm",
-                node_binary.display()
-            )
-        })?;
+        let npm = which::which("npm")
+            .or_else(|_| which::which("npm.cmd"))
+            .map_err(|_| {
+                format!(
+                    "找不到 npm-cli.js 或 npm，无法通过 {} 安装 pnpm",
+                    node_binary.display()
+                )
+            })?;
         let mut cmd = Command::new(npm);
         cmd.arg("install")
             .arg("-g")
@@ -901,10 +918,7 @@ fn pnpm_install_harness(
     } else if pnpm_binary_usable(pnpm_binary) {
         Command::new(pnpm_binary)
     } else {
-        return Err(format!(
-            "pnpm entry is missing: {}",
-            pnpm_binary.display()
-        ));
+        return Err(format!("pnpm entry is missing: {}", pnpm_binary.display()));
     };
     configure_pnpm_install(&mut cmd, node_binary, harness_root, &registry)?;
 
@@ -1007,10 +1021,7 @@ mod tests {
 
     #[test]
     fn treats_node_byte_size_as_manifest_identity() {
-        let dir = std::env::temp_dir().join(format!(
-            "dsh-node-manifest-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("dsh-node-manifest-{}", std::process::id()));
         let _ = fs::create_dir_all(&dir);
         let node = dir.join("node.exe");
         fs::write(&node, b"node-binary").unwrap();
