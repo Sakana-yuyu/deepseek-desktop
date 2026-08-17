@@ -18,6 +18,9 @@
 | **托盘** | 原生托盘图标 | 第一次关闭询问最小化到托盘还是退出，并写入 `desktop-settings.json`；托盘可改该偏好、显示窗口、检查更新或退出。退出会停止 Host 的 Node 进程树；最小化到托盘则保持运行 |
 | **通知** | Overlay 插件 + 本机 POST | `turn/end` 且 `completed` 时，窗口不在前台则弹出系统通知并播放 `sounds/complete.wav` |
 | **更新** | 内置更新公钥 | 检查稳定的 GitHub 更新 manifest，验证下载产物签名，安装并重启 |
+| **Agent 环境** | Windows（默认）或 WSL | 托盘写入 `desktop-settings.json`；WSL 在默认 WSL2 发行版内启动 Linux `dsh web`；需重启后生效 |
+
+Windows 桌面只交付一个安装包、一个桌面二进制和同一个 Web 客户端（WebView 中的 `dsh web`）；这不是第二个 SKU，也不是第二套 Web UI。托盘中的 Agent 环境开关只改变 Host 进程的运行位置：Windows Node + pwsh，或默认 WSL2 发行版内的 Linux Node + bash。切换是运维操作，不是第二套代码：需要重启；Windows 使用隔离的桌面主目录，WSL 使用发行版内的 `~/.dsh`；会话不共享；当 Linux 主目录同时缺少凭据与 `.env` 时，会从 Windows 主目录各复制一次。再做一个安装包或分叉 Web 客户端会重复更新器、overlay、主目录和 CI，因此不单独交付。WSL 模式下工作区浏览使用 Linux 路径（例如 Windows 盘符对应 `/mnt/d/...`）；不修改 `packages/`；若 Docker Desktop 是默认发行版，需用 `wsl --set-default` 设为可用的 WSL2 发行版。
 
 安装包内的源码树包括：带已构建 `lib/` 的 `apps/cli`、带 `dist/` 的 `apps/web`、除 examples 与 test-support 外的 `packages/*/*`、`native/landlock-run`、`vendor/*`、`patches/` 和 lockfile。构建安装包时会移除 workspace 的 `devDependencies`，使 `--prod` 安装无需解析演示包。
 
@@ -43,7 +46,7 @@
 - `bin/` — 写入 Host PATH 的可 spawn `dsh.exe` / `dsh.cmd` / `pnpm.cmd`；用户 Path 缺失时也会加入
 - `cache/` — 下载的 Node zip 或 tarball
 
-首次启动会先扫描进程 `PATH`（Windows 上再加上用户/系统里的持久 Path）和常见安装位置，查找满足 `^22.19 || >=24` 的 Node 和可用的 pnpm，再决定是否从镜像下载。若 `$DSH_HOME`（进程环境，或 Windows 上的用户/系统环境）或 `~/.dsh` 已包含会话、凭据、`.env`、profile 或 settings，则采用该主目录，并把隔离 `dsh-home/` 中缺失的文件复制进去。随后写入可被 spawn 的 `dsh` / `pnpm` shim（`dsh.exe` 是以 CLI 跳板运行的桌面二进制），并把已选定的 Node / pnpm 目录（以及发现 PATH 上缺少 `git` 或 `bash` 时的 Git `cmd`/`bin`）前置到 Host PATH，使应用内的 `spawn('dsh')`、`dsh plugin`、MCP 的 `npx` 以及 agent 的 `bash`/`git` 查找能够解析。Windows 不写入无扩展名的 `dsh` 文件。父进程没有可见控制台时，Windows 上的 Host 与 CLI 子进程不会再弹出控制台窗口。用户 Path 通过注册表加入 shim 目录；仅当对应命令仍不是可 spawn 文件时，才加入 Node 或 pnpm 目录。扫描失败时，预配器仍会为 Windows x64/x86、macOS x64/arm64 和 Linux x64/arm64 下载 Node。zip 与 tar.gz 解压会拒绝预期 Node 根目录以外的条目。Unix 压缩包保留可执行权限。私有安装的 pnpm 由已选定的 Node 二进制执行；扫描到主机 pnpm 时则直接调用。按源码包隔离的 Harness 目录允许更新版本预配新源码，而不删除旧 Host 正在使用的文件；兼容的 Node 和 pnpm 会在源码更新之间复用。原生外壳只允许一个应用实例，重复启动时聚焦已有窗口。Release 构建会在主窗口打开后再检查更新；更新网络或 manifest 失败只写入日志，不拖住启动页。运行时 manifest 已就绪时跳过主机工具链扫描，并用文件大小比对 Node，不再对 `node.exe` 做 SHA256。窗口标题栏、托盘、更新、系统通知和完成音都留在这个 Rust crate。与 Host 的协作是复制到 `$DSH_HOME/desktop-overlay` 的 overlay 插件，通过 `dsh web --patch` 加载，不修改 `packages/`。
+首次启动会先扫描进程 `PATH`（Windows 上再加上用户/系统里的持久 Path）和常见安装位置，查找满足 `^22.19 || >=24` 的 Node 和可用的 pnpm，再决定是否从镜像下载。若 `$DSH_HOME`（进程环境，或 Windows 上的用户/系统环境）或 `~/.dsh` 已包含会话、凭据、`.env`、profile 或 settings，则采用该主目录，并把隔离 `dsh-home/` 中缺失的文件复制进去。随后写入可被 spawn 的 `dsh` / `pnpm` shim（`dsh.exe` 是以 CLI 跳板运行的桌面二进制），并把已选定的 Node / pnpm 目录（以及发现 PATH 上缺少 `git` 或 `bash` 时的 Git `cmd`/`bin`）前置到 Host PATH，使应用内的 `spawn('dsh')`、`dsh plugin`、MCP 的 `npx` 以及 agent 的 `bash`/`git` 查找能够解析。Windows 不写入无扩展名的 `dsh` 文件。父进程没有可见控制台时，Windows 上的 Host 与 CLI 子进程不会再弹出控制台窗口。用户 Path 通过注册表加入 shim 目录；仅当对应命令仍不是可 spawn 文件时，才加入 Node 或 pnpm 目录。扫描失败时，预配器仍会为 Windows x64/x86、macOS x64/arm64 和 Linux x64/arm64 下载 Node。zip 与 tar.gz 解压会拒绝预期 Node 根目录以外的条目。Unix 压缩包保留可执行权限。私有安装的 pnpm 由已选定的 Node 二进制执行；扫描到主机 pnpm 时则直接调用。按源码包隔离的 Harness 目录允许更新版本预配新源码，而不删除旧 Host 正在使用的文件；兼容的 Node 和 pnpm 会在源码更新之间复用。原生外壳只允许一个应用实例，重复启动时聚焦已有窗口。Release 构建会在主窗口打开后再检查更新；更新网络或 manifest 失败只写入日志，不拖住启动页。运行时 manifest 已就绪且仍指向可用的 Node / pnpm 时，跳过主机工具链扫描、源码释放和 `pnpm install`，并用文件大小比对 Node，不再对 `node.exe` 做 SHA256。仅当 `dsh.exe` shim 缺失、大小不同、或比桌面二进制更旧时才刷新。窗口标题栏、托盘、更新、系统通知和完成音都留在这个 Rust crate。与 Host 的协作是复制到 `$DSH_HOME/desktop-overlay` 的 overlay 插件，通过 `dsh web --patch` 加载，不修改 `packages/`。
 
 ## 构建
 
