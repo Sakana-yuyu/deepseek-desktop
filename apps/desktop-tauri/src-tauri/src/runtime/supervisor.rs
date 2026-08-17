@@ -15,6 +15,8 @@ use super::wsl::{build_wsl_web_command, WslLaunchSpec, WslRunner, WslRuntimePath
 
 /// Maximum broken plugins one boot disables before giving up on the Host.
 const MAX_PLUGIN_RESCUES: usize = 4;
+/// Bound for reading the Linux pid handshake from WSL stderr.
+const WSL_PID_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Linux Host identity inside a WSL distro (pid discovered via stderr handshake).
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -31,7 +33,8 @@ pub struct HostHandle {
     /// `--patch` this session; empty when the Host started clean.
     pub disabled_plugins: Vec<String>,
     /// Set when the Host runs inside WSL; `None` for the Windows `node.exe` path.
-    pub wsl: Option<WslSession>,
+    /// Cleared on the first successful `stop` so Drop does not wait again.
+    pub wsl: Mutex<Option<WslSession>>,
     child: Arc<Mutex<Option<Child>>>,
     #[cfg(windows)]
     job: Mutex<Option<super::process::KillOnCloseJob>>,
@@ -41,8 +44,13 @@ impl HostHandle {
     /// Stop the Host Node tree. Safe to call more than once, including before
     /// `app.exit` / `app.restart`, which do not run `Drop`.
     pub fn stop(&self) {
-        if let Some(session) = &self.wsl {
-            stop_wsl_linux_host(session);
+        let session = self
+            .wsl
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take());
+        if let Some(session) = session {
+            stop_wsl_linux_host(&session);
         }
         if let Ok(mut guard) = self.child.lock() {
             if let Some(mut child) = guard.take() {
@@ -177,7 +185,7 @@ pub async fn spawn_web_host(
             port,
             web_url,
             disabled_plugins,
-            wsl: None,
+            wsl: Mutex::new(None),
             child: child_handle,
             #[cfg(windows)]
             job: Mutex::new(job),
@@ -225,7 +233,13 @@ pub async fn spawn_wsl_web_host(
     let job = attach_host_job(&child);
 
     let stderr_lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    let linux_pid = take_linux_pid_and_drain_stderr(&mut child, &stderr_lines)?;
+    let linux_pid = match take_linux_pid_and_drain_stderr(&mut child, &stderr_lines).await {
+        Ok(pid) => pid,
+        Err(error) => {
+            reap_wsl_stub_only(&mut child);
+            return Err(error);
+        }
+    };
 
     if let Err(error) = write_host_pid(
         &host_pid_path(),
@@ -243,6 +257,10 @@ pub async fn spawn_wsl_web_host(
     }
 
     let child_handle = Arc::new(Mutex::new(Some(child)));
+    let session = WslSession {
+        distro: paths.distro.clone(),
+        linux_pid,
+    };
     let wsl_timeout = "请检查 WSL 的 localhost 转发（localhostForwarding）。";
     if let Err(error) = wait_for_http(
         &web_url,
@@ -253,19 +271,7 @@ pub async fn spawn_wsl_web_host(
     )
     .await
     {
-        let session = WslSession {
-            distro: paths.distro.clone(),
-            linux_pid,
-        };
-        stop_wsl_linux_host(&session);
-        if let Ok(mut guard) = child_handle.lock() {
-            if let Some(mut child) = guard.take() {
-                kill_process_tree(child.id());
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-        }
-        let _ = std::fs::remove_file(host_pid_path());
+        reap_wsl_session_and_stub(&session, &child_handle);
         return Err(error);
     }
 
@@ -277,23 +283,27 @@ pub async fn spawn_wsl_web_host(
         port,
         web_url,
         disabled_plugins: Vec::new(),
-        wsl: Some(WslSession {
-            distro: paths.distro.clone(),
-            linux_pid,
-        }),
+        wsl: Mutex::new(Some(session)),
         child: child_handle,
         #[cfg(windows)]
         job: Mutex::new(job),
     })
 }
 
-/// Parse the Linux Host pid from the handshake line written to stderr.
+/// Parse the Linux Host pid from stderr handshake text.
+///
+/// Scans every line and returns the first that is entirely a decimal pid so a
+/// leading `wsl.exe` diagnostic does not hide `echo $$`.
 pub fn parse_linux_pid_from_stderr(stderr: &str) -> Option<u32> {
-    let first = stderr.lines().next()?.trim();
-    if first.is_empty() {
+    stderr.lines().find_map(parse_linux_pid_line)
+}
+
+fn parse_linux_pid_line(line: &str) -> Option<u32> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
         return None;
     }
-    first.parse().ok()
+    trimmed.parse().ok()
 }
 
 /// `wsl.exe` argv that sends `SIGTERM` to the Linux Host pid (never `--terminate`).
@@ -354,6 +364,25 @@ fn run_wsl_argv(args: &[String]) -> Result<i32, String> {
     Ok(status.code().unwrap_or(-1))
 }
 
+fn reap_wsl_stub_only(child: &mut Child) {
+    kill_process_tree(child.id());
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = std::fs::remove_file(host_pid_path());
+}
+
+fn reap_wsl_session_and_stub(session: &WslSession, child: &Arc<Mutex<Option<Child>>>) {
+    stop_wsl_linux_host(session);
+    if let Ok(mut guard) = child.lock() {
+        if let Some(mut child) = guard.take() {
+            kill_process_tree(child.id());
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+    let _ = std::fs::remove_file(host_pid_path());
+}
+
 #[allow(dead_code)] // used by spawn_wsl_web_host (Task 8)
 fn spawn_wsl_child(command: &super::wsl::WslCommand) -> Result<Child, String> {
     let mut cmd = Command::new(&command.program);
@@ -365,8 +394,10 @@ fn spawn_wsl_child(command: &super::wsl::WslCommand) -> Result<Child, String> {
         .map_err(|e| format!("无法启动 WSL dsh web: {e}"))
 }
 
+/// Read stderr until the first parseable pid line, within [`WSL_PID_HANDSHAKE_TIMEOUT`].
+/// Remaining lines keep draining into `stderr_lines` for later failure messages.
 #[allow(dead_code)] // used by spawn_wsl_web_host (Task 8)
-fn take_linux_pid_and_drain_stderr(
+async fn take_linux_pid_and_drain_stderr(
     child: &mut Child,
     stderr_lines: &Arc<Mutex<Vec<String>>>,
 ) -> Result<u32, String> {
@@ -374,26 +405,79 @@ fn take_linux_pid_and_drain_stderr(
         .stderr
         .take()
         .ok_or_else(|| "WSL Host stderr 不可用".to_string())?;
-    let mut reader = BufReader::new(stderr);
-    let mut first = String::new();
-    reader
-        .read_line(&mut first)
-        .map_err(|e| format!("无法读取 WSL Host pid: {e}"))?;
-    let linux_pid = parse_linux_pid_from_stderr(&first).ok_or_else(|| {
-        format!(
-            "无法解析 WSL Host pid（handshake）: {}",
-            first.trim_end()
-        )
-    })?;
-    if let Ok(mut guard) = stderr_lines.lock() {
-        let trimmed = first.trim_end();
-        if !trimmed.is_empty() {
-            guard.push(trimmed.to_string());
+    let lines = Arc::clone(stderr_lines);
+    let join = tokio::task::spawn_blocking(move || {
+        read_linux_pid_handshake(stderr, lines, WSL_PID_HANDSHAKE_TIMEOUT)
+    });
+    join.await
+        .map_err(|e| format!("WSL Host pid handshake 任务失败: {e}"))?
+}
+
+fn read_linux_pid_handshake<R: std::io::Read + Send + 'static>(
+    stderr: R,
+    stderr_lines: Arc<Mutex<Vec<String>>>,
+    timeout: Duration,
+) -> Result<u32, String> {
+    let (tx, rx) = std::sync::mpsc::channel::<Result<u32, String>>();
+    std::thread::spawn(move || {
+        let mut reader = BufReader::new(stderr);
+        let mut line = String::new();
+        let mut sent = false;
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let trimmed = line.trim_end().to_string();
+                    if !trimmed.is_empty() {
+                        if let Ok(mut guard) = stderr_lines.lock() {
+                            guard.push(trimmed.clone());
+                            if guard.len() > 64 {
+                                let drop = guard.len() - 64;
+                                guard.drain(0..drop);
+                            }
+                        }
+                    }
+                    if !sent {
+                        if let Some(pid) = parse_linux_pid_line(&trimmed) {
+                            let _ = tx.send(Ok(pid));
+                            sent = true;
+                        }
+                    }
+                }
+                Err(error) => {
+                    if !sent {
+                        let _ = tx.send(Err(format!("无法读取 WSL Host pid: {error}")));
+                    }
+                    return;
+                }
+            }
+        }
+        if !sent {
+            let preview = stderr_lines
+                .lock()
+                .map(|lines| lines.join("\n"))
+                .unwrap_or_default();
+            let detail = if preview.is_empty() {
+                "无 stderr 输出".to_string()
+            } else {
+                preview
+            };
+            let _ = tx.send(Err(format!(
+                "无法解析 WSL Host pid（handshake）: {detail}"
+            )));
+        }
+    });
+
+    match rx.recv_timeout(timeout) {
+        Ok(result) => result,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            Err("等待 WSL Host pid handshake 超时".into())
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Err("WSL Host pid handshake 通道已断开".into())
         }
     }
-    let lines = Arc::clone(stderr_lines);
-    std::thread::spawn(move || drain_lines(reader, lines));
-    Ok(linux_pid)
 }
 
 /// Write the rescue `--patch` overlay that disables the given plugin entry ids.
@@ -579,8 +663,12 @@ fn port_free(port: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        failing_loader_entry, parse_linux_pid_from_stderr, rescue_patch_body, wsl_stop_args,
+        failing_loader_entry, parse_linux_pid_from_stderr, read_linux_pid_handshake,
+        rescue_patch_body, wsl_stop_args,
     };
+    use std::io::Read;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     #[test]
     fn extracts_the_plugin_id_from_a_loader_failure() {
@@ -608,6 +696,10 @@ invalid plugin, expect function or object with an \"apply\" method, received obj
     fn parses_linux_pid_from_first_stderr_line() {
         assert_eq!(parse_linux_pid_from_stderr("43210\nready\n"), Some(43210));
         assert_eq!(parse_linux_pid_from_stderr("not-a-pid\n"), None);
+        assert_eq!(
+            parse_linux_pid_from_stderr("wsl: localhost proxy\n43210\nready\n"),
+            Some(43210)
+        );
     }
 
     #[test]
@@ -616,5 +708,36 @@ invalid plugin, expect function or object with an \"apply\" method, received obj
         assert_eq!(args[0], "-d");
         assert!(args.contains(&"kill".into()));
         assert!(!args.iter().any(|a| a == "--terminate"));
+    }
+
+    #[test]
+    fn handshake_scans_past_diagnostic_lines() {
+        let lines = Arc::new(Mutex::new(Vec::new()));
+        let stderr = std::io::Cursor::new(b"wsl: diagnostic\n43210\nafter\n".to_vec());
+        let pid =
+            read_linux_pid_handshake(stderr, Arc::clone(&lines), Duration::from_secs(2)).unwrap();
+        assert_eq!(pid, 43210);
+        std::thread::sleep(Duration::from_millis(50));
+        let captured = lines.lock().unwrap();
+        assert!(captured.iter().any(|l| l.contains("diagnostic")));
+        assert!(captured.iter().any(|l| l == "43210"));
+        assert!(captured.iter().any(|l| l == "after"));
+    }
+
+    #[test]
+    fn handshake_times_out_when_stderr_stalls() {
+        struct Stall;
+        impl Read for Stall {
+            fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+                std::thread::sleep(Duration::from_secs(10));
+                Ok(0)
+            }
+        }
+        let lines = Arc::new(Mutex::new(Vec::new()));
+        let err = read_linux_pid_handshake(Stall, lines, Duration::from_millis(200)).unwrap_err();
+        assert!(
+            err.contains("超时"),
+            "expected timeout error, got: {err}"
+        );
     }
 }
