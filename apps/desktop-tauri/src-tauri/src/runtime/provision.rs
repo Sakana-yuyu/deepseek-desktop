@@ -39,12 +39,13 @@ enum ArchiveKind {
     Zip,
 }
 
+/// Node distribution archive coordinates for a given OS/arch.
 #[derive(Debug)]
-struct NodeArchiveSpec {
-    archive_name: String,
-    inner_folder: String,
+pub(crate) struct NodeArchiveSpec {
+    pub(crate) archive_name: String,
+    pub(crate) inner_folder: String,
     kind: ArchiveKind,
-    url: String,
+    pub(crate) url: String,
 }
 
 /// Ensure bundled harness + Node + pnpm deps exist; mirror-fetch only build tools.
@@ -89,7 +90,7 @@ pub async fn ensure_runtime(
         &isolated_home,
     )));
 
-    if manifest_ready(
+    if let Some((node_binary, pnpm_binary)) = ready_toolchain(
         &manifest_path,
         &bundled,
         &preferred_node,
@@ -97,12 +98,16 @@ pub async fn ensure_runtime(
         &harness_root,
         &cli_entry,
     ) {
-        boot_log::info("provision skipped: manifest ready");
+        boot_log::info(&format!(
+            "provision skipped: manifest ready node={} pnpm={}",
+            node_binary.display(),
+            pnpm_binary.display()
+        ));
         progress(ProvisionEvent::Status("运行环境已就绪".into()));
         progress(ProvisionEvent::Progress(100));
         return Ok(RuntimePaths {
-            node_binary: preferred_node,
-            pnpm_binary: preferred_pnpm,
+            node_binary,
+            pnpm_binary,
             cli_entry,
             harness_root,
             runtime_root,
@@ -191,14 +196,20 @@ pub async fn ensure_runtime(
         }
     }
 
-    progress(ProvisionEvent::Status(
-        "正在从镜像安装依赖 (pnpm install --prod --no-frozen-lockfile)…".into(),
-    ));
-    progress(ProvisionEvent::Progress(50));
-    if let Err(error) = pnpm_install_harness(&node_binary, &pnpm_binary, &harness_root) {
-        boot_log::info(&format!("pnpm install harness fallback: {error}"));
-        if !harness_root.join("node_modules").join(".pnpm").is_dir() && !is_recoverable_io(&error) {
-            return Err(error);
+    if harness_deps_installed(&harness_root) {
+        boot_log::info("pnpm install skipped: node_modules ready");
+        progress(ProvisionEvent::Status("依赖已就绪".into()));
+        progress(ProvisionEvent::Progress(90));
+    } else {
+        progress(ProvisionEvent::Status(
+            "正在从镜像安装依赖 (pnpm install --prod --no-frozen-lockfile)…".into(),
+        ));
+        progress(ProvisionEvent::Progress(50));
+        if let Err(error) = pnpm_install_harness(&node_binary, &pnpm_binary, &harness_root) {
+            boot_log::info(&format!("pnpm install harness fallback: {error}"));
+            if !harness_deps_installed(&harness_root) && !is_recoverable_io(&error) {
+                return Err(error);
+            }
         }
     }
 
@@ -213,6 +224,7 @@ pub async fn ensure_runtime(
         &manifest_path,
         &bundled,
         &node_binary,
+        &pnpm_binary,
         &harness_root,
         &cli_entry,
     ) {
@@ -306,34 +318,43 @@ fn resolve_local_repo() -> Result<RuntimePaths, String> {
     })
 }
 
-fn manifest_ready(
+fn harness_deps_installed(harness_root: &Path) -> bool {
+    harness_root.join("node_modules").join(".pnpm").is_dir()
+}
+
+/// Recorded Node and pnpm when this bundle already has a CLI entry, deps, and
+/// those binaries (host or private) are still present.
+fn ready_toolchain(
     manifest_path: &Path,
     bundled: &Path,
-    node_binary: &Path,
-    pnpm_binary: &Path,
+    preferred_node: &Path,
+    preferred_pnpm: &Path,
     harness_root: &Path,
     cli_entry: &Path,
-) -> bool {
-    if !manifest_path.is_file()
-        || !node_binary.is_file()
-        || !pnpm_binary.is_file()
-        || !cli_entry.is_file()
-        || !harness_root.join("node_modules").join(".pnpm").is_dir()
-    {
-        return false;
+) -> Option<(PathBuf, PathBuf)> {
+    if !manifest_path.is_file() || !cli_entry.is_file() || !harness_deps_installed(harness_root) {
+        return None;
     }
 
-    let Ok(raw) = fs::read_to_string(manifest_path) else {
-        return false;
-    };
-    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) else {
-        return false;
-    };
-    let Ok(bundle_hash) = read_bundle_hash(bundled) else {
-        return false;
-    };
-    bundle_hash == parsed["bundleSha256"].as_str().unwrap_or("")
-        && node_matches_manifest(node_binary, &parsed)
+    let raw = fs::read_to_string(manifest_path).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let bundle_hash = read_bundle_hash(bundled).ok()?;
+    if bundle_hash != parsed["bundleSha256"].as_str().unwrap_or("") {
+        return None;
+    }
+    let node_binary = recorded_or_preferred_file(parsed["nodePath"].as_str(), preferred_node)?;
+    if !node_matches_manifest(&node_binary, &parsed) {
+        return None;
+    }
+    let pnpm_binary = recorded_or_preferred_file(parsed["pnpmPath"].as_str(), preferred_pnpm)?;
+    Some((node_binary, pnpm_binary))
+}
+
+fn recorded_or_preferred_file(recorded: Option<&str>, preferred: &Path) -> Option<PathBuf> {
+    if let Some(path) = recorded.map(PathBuf::from).filter(|path| path.is_file()) {
+        return Some(path);
+    }
+    preferred.is_file().then(|| preferred.to_path_buf())
 }
 
 fn node_matches_manifest(node_binary: &Path, parsed: &serde_json::Value) -> bool {
@@ -470,6 +491,7 @@ fn write_manifest(
     path: &Path,
     bundled: &Path,
     node_binary: &Path,
+    pnpm_binary: &Path,
     harness_root: &Path,
     cli_entry: &Path,
 ) -> Result<(), String> {
@@ -480,6 +502,7 @@ fn write_manifest(
         "pnpmVersion": DEFAULT_PNPM_VERSION,
         "nodeBytes": fs::metadata(node_binary).map(|meta| meta.len()).unwrap_or(0),
         "nodePath": node_binary.display().to_string(),
+        "pnpmPath": pnpm_binary.display().to_string(),
         "cliSha256": file_sha256(cli_entry)?,
         "harnessRoot": harness_root.display().to_string(),
         "provisionedAt": std::time::SystemTime::now()
@@ -509,6 +532,10 @@ fn read_bundle_version(bundled: &Path) -> Result<String, String> {
 
 fn seed_harness_tree(source: &Path, dest: &Path) -> Result<(), String> {
     let cli = dest.join("apps").join("cli").join("lib").join("bin.js");
+    if cli.is_file() {
+        boot_log::info(&format!("reusing seeded harness {}", dest.display()));
+        return Ok(());
+    }
     if dest.exists() {
         if let Err(error) = fs::remove_dir_all(dest) {
             let message = recoverable_message("seed remove", dest, error);
@@ -702,7 +729,11 @@ fn node_archive_spec(version: &str) -> Result<NodeArchiveSpec, String> {
     node_archive_spec_for(version, std::env::consts::OS, std::env::consts::ARCH)
 }
 
-fn node_archive_spec_for(version: &str, os: &str, arch: &str) -> Result<NodeArchiveSpec, String> {
+pub(crate) fn node_archive_spec_for(
+    version: &str,
+    os: &str,
+    arch: &str,
+) -> Result<NodeArchiveSpec, String> {
     let base = node_mirror_base().trim_end_matches('/').to_string();
     let (target, kind, extension) = match (os, arch) {
         ("windows", "x86_64") => ("win-x64", ArchiveKind::Zip, "zip"),
@@ -724,7 +755,7 @@ fn node_archive_spec_for(version: &str, os: &str, arch: &str) -> Result<NodeArch
     })
 }
 
-async fn download_file(
+pub(crate) async fn download_file(
     url: &str,
     dest: &Path,
     progress_start: u8,
@@ -922,11 +953,57 @@ fn pnpm_install_harness(
 #[cfg(test)]
 mod tests {
     use super::{
-        harness_root_for_bundle, node_archive_spec_for, node_matches_manifest,
-        safe_archive_relative_path,
+        harness_root_for_bundle, node_archive_spec_for, node_matches_manifest, ready_toolchain,
+        safe_archive_relative_path, seed_harness_tree,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_root() -> PathBuf {
+        let id = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!(
+            "dsh-desktop-provision-{}-{}-{}",
+            std::process::id(),
+            nanos,
+            id
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn write_ready_tree(root: &Path, hash: &str) -> (PathBuf, PathBuf, PathBuf, PathBuf, PathBuf) {
+        let bundled = root.join("bundled");
+        fs::create_dir_all(&bundled).unwrap();
+        fs::write(
+            bundled.join(".bundle-manifest.json"),
+            format!(r#"{{"contentSha256":"{hash}"}}"#),
+        )
+        .unwrap();
+        let harness = root.join("harness");
+        let cli = harness
+            .join("apps")
+            .join("cli")
+            .join("lib")
+            .join("bin.js");
+        fs::create_dir_all(cli.parent().unwrap()).unwrap();
+        fs::write(&cli, "cli").unwrap();
+        fs::create_dir_all(harness.join("node_modules").join(".pnpm")).unwrap();
+        let host_node = root.join("host").join("node.exe");
+        let host_pnpm = root.join("host").join("pnpm.cmd");
+        fs::create_dir_all(host_node.parent().unwrap()).unwrap();
+        fs::write(&host_node, b"host-node").unwrap();
+        fs::write(&host_pnpm, b"host-pnpm").unwrap();
+        (bundled, harness, cli, host_node, host_pnpm)
+    }
 
     #[test]
     fn isolates_harness_trees_by_bundle_hash() {
@@ -1020,5 +1097,150 @@ mod tests {
         ));
         assert!(node_matches_manifest(&node, &serde_json::json!({})));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reuses_recorded_host_toolchain_when_private_runtime_is_absent() {
+        let root = temp_root();
+        let (bundled, harness, cli, host_node, host_pnpm) = write_ready_tree(&root, "abc");
+        let bytes = fs::metadata(&host_node).unwrap().len();
+        let manifest = root.join("manifest.json");
+        fs::write(
+            &manifest,
+            serde_json::json!({
+                "bundleSha256": "abc",
+                "nodeBytes": bytes,
+                "nodePath": host_node.display().to_string(),
+                "pnpmPath": host_pnpm.display().to_string(),
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let preferred_node = root.join("runtime").join("node").join("node.exe");
+        let preferred_pnpm = root.join("runtime").join("pnpm-global").join("pnpm.cmd");
+        assert_eq!(
+            ready_toolchain(
+                &manifest,
+                &bundled,
+                &preferred_node,
+                &preferred_pnpm,
+                &harness,
+                &cli,
+            ),
+            Some((host_node, host_pnpm))
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn falls_back_to_private_pnpm_when_manifest_omits_pnpm_path() {
+        let root = temp_root();
+        let (bundled, harness, cli, host_node, _host_pnpm) = write_ready_tree(&root, "abc");
+        let preferred_pnpm = root.join("runtime").join("pnpm-global").join("pnpm.cmd");
+        fs::create_dir_all(preferred_pnpm.parent().unwrap()).unwrap();
+        fs::write(&preferred_pnpm, b"private-pnpm").unwrap();
+        let bytes = fs::metadata(&host_node).unwrap().len();
+        let manifest = root.join("manifest.json");
+        fs::write(
+            &manifest,
+            serde_json::json!({
+                "bundleSha256": "abc",
+                "nodeBytes": bytes,
+                "nodePath": host_node.display().to_string(),
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let preferred_node = root.join("runtime").join("node").join("node.exe");
+        assert_eq!(
+            ready_toolchain(
+                &manifest,
+                &bundled,
+                &preferred_node,
+                &preferred_pnpm,
+                &harness,
+                &cli,
+            ),
+            Some((host_node, preferred_pnpm))
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rejects_a_ready_tree_when_node_modules_are_missing() {
+        let root = temp_root();
+        let (bundled, harness, cli, host_node, host_pnpm) = write_ready_tree(&root, "abc");
+        fs::remove_dir_all(harness.join("node_modules")).unwrap();
+        let bytes = fs::metadata(&host_node).unwrap().len();
+        let manifest = root.join("manifest.json");
+        fs::write(
+            &manifest,
+            serde_json::json!({
+                "bundleSha256": "abc",
+                "nodeBytes": bytes,
+                "nodePath": host_node.display().to_string(),
+                "pnpmPath": host_pnpm.display().to_string(),
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            ready_toolchain(
+                &manifest,
+                &bundled,
+                &host_node,
+                &host_pnpm,
+                &harness,
+                &cli,
+            ),
+            None
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn reuses_an_already_seeded_harness_tree() {
+        let root = temp_root();
+        let source = root.join("bundled");
+        let dest = root.join("harness");
+        fs::create_dir_all(source.join("apps").join("cli").join("lib")).unwrap();
+        fs::write(
+            source.join("apps").join("cli").join("lib").join("bin.js"),
+            "new",
+        )
+        .unwrap();
+        fs::create_dir_all(dest.join("apps").join("cli").join("lib")).unwrap();
+        fs::write(
+            dest.join("apps").join("cli").join("lib").join("bin.js"),
+            "old",
+        )
+        .unwrap();
+        fs::write(dest.join("keep.txt"), "keep").unwrap();
+        seed_harness_tree(&source, &dest).unwrap();
+        assert_eq!(fs::read_to_string(dest.join("keep.txt")).unwrap(), "keep");
+        assert_eq!(
+            fs::read_to_string(dest.join("apps").join("cli").join("lib").join("bin.js")).unwrap(),
+            "old"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn copies_bundled_source_when_the_harness_tree_is_missing() {
+        let root = temp_root();
+        let source = root.join("bundled");
+        let dest = root.join("harness");
+        fs::create_dir_all(source.join("apps").join("cli").join("lib")).unwrap();
+        fs::write(
+            source.join("apps").join("cli").join("lib").join("bin.js"),
+            "new",
+        )
+        .unwrap();
+        seed_harness_tree(&source, &dest).unwrap();
+        assert_eq!(
+            fs::read_to_string(dest.join("apps").join("cli").join("lib").join("bin.js")).unwrap(),
+            "new"
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 }
