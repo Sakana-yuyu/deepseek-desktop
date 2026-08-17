@@ -48,14 +48,17 @@ fn parse_unc_path(text: &str) -> Result<String, String> {
 
 fn parse_drive_prefix(text: &str) -> Option<(char, &str)> {
     let bytes = text.as_bytes();
-    if bytes.len() < 2 {
+    if bytes.len() < 3 {
         return None;
     }
     let drive = bytes[0] as char;
     if !drive.is_ascii_alphabetic() || bytes[1] != b':' {
         return None;
     }
-    Some((drive.to_ascii_lowercase(), &text[2..]))
+    if bytes[2] != b'\\' && bytes[2] != b'/' {
+        return None;
+    }
+    Some((drive.to_ascii_lowercase(), &text[3..]))
 }
 
 fn build_mnt_path(drive: char, rest: &str) -> Result<String, String> {
@@ -127,6 +130,9 @@ mod tests {
     #[test]
     fn rejects_relative_path() {
         let err = windows_to_wsl_mount(Path::new("Project/foo")).unwrap_err();
+        assert_eq!(err, "路径必须是绝对路径。");
+
+        let err = windows_to_wsl_mount(Path::new(r"D:Project\foo")).unwrap_err();
         assert_eq!(err, "路径必须是绝对路径。");
     }
 }
