@@ -54,6 +54,11 @@ pub fn kill_process_tree(pid: u32) {
 }
 
 /// Record the Host pid and Node image so a later launch can reap an orphan.
+///
+/// WSL callers pass the Windows `wsl.exe` stub pid and the Linux Node image
+/// path (`Path::new(linux_node)`). [`reclaim_stale_host`] will not match that
+/// pair (Windows image ≠ Linux path), so live WSL reaping stays on
+/// `HostHandle::stop`.
 pub fn write_host_pid(path: &Path, pid: u32, node: &Path) -> Result<(), String> {
     std::fs::write(path, format!("{pid}\n{}\n", node.display())).map_err(|e| e.to_string())
 }

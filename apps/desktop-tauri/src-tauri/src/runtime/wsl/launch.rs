@@ -51,6 +51,11 @@ pub fn build_wsl_web_command(spec: &WslLaunchSpec) -> Result<WslCommand, String>
         args.push(format!("DSH_DESKTOP_NOTIFY_URL={url}"));
     }
 
+    // Echo the Linux shell pid on stderr, then exec node so stop can signal it.
+    args.push("/bin/sh".into());
+    args.push("-c".into());
+    args.push(r#"echo $$ >&2; exec "$@""#.into());
+    args.push("sh".into());
     args.push(spec.linux_node.clone());
     args.push(spec.linux_cli.clone());
     args.push("web".into());
@@ -107,6 +112,10 @@ mod tests {
             "DSH_HOME=/home/u/.dsh".to_string(),
             "NODE_ENV=production".to_string(),
             "DSH_DESKTOP_NOTIFY_URL=http://127.0.0.1:17991/".to_string(),
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            r#"echo $$ >&2; exec "$@""#.to_string(),
+            "sh".to_string(),
             "/home/u/.local/share/dsh-desktop/runtime/node/bin/node".to_string(),
             "/home/u/.local/share/dsh-desktop/harness-versions/abc/apps/cli/lib/bin.js"
                 .to_string(),
@@ -119,6 +128,8 @@ mod tests {
             "17890".to_string(),
         ];
         assert_eq!(cmd.args, expected);
+        assert!(cmd.args.iter().any(|a| a == "--exec"));
+        assert!(!cmd.args.iter().any(|a| a == "bash" || a == "-lc"));
     }
 
     #[test]

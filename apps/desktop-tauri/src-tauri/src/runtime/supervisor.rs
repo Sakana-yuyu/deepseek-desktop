@@ -11,9 +11,17 @@ use super::process::{
     hide_console, isolate_host_group, kill_process_tree, reclaim_stale_host, write_host_pid,
 };
 use super::provision::RuntimePaths;
+use super::wsl::{build_wsl_web_command, WslLaunchSpec, WslRunner, WslRuntimePaths};
 
 /// Maximum broken plugins one boot disables before giving up on the Host.
 const MAX_PLUGIN_RESCUES: usize = 4;
+
+/// Linux Host identity inside a WSL distro (pid discovered via stderr handshake).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WslSession {
+    pub distro: String,
+    pub linux_pid: u32,
+}
 
 /// Running `dsh web` child, bound port, and verified base URL.
 pub struct HostHandle {
@@ -22,6 +30,8 @@ pub struct HostHandle {
     /// Plugin entry ids whose load failure was bypassed through a rescue
     /// `--patch` this session; empty when the Host started clean.
     pub disabled_plugins: Vec<String>,
+    /// Set when the Host runs inside WSL; `None` for the Windows `node.exe` path.
+    pub wsl: Option<WslSession>,
     child: Arc<Mutex<Option<Child>>>,
     #[cfg(windows)]
     job: Mutex<Option<super::process::KillOnCloseJob>>,
@@ -31,6 +41,9 @@ impl HostHandle {
     /// Stop the Host Node tree. Safe to call more than once, including before
     /// `app.exit` / `app.restart`, which do not run `Drop`.
     pub fn stop(&self) {
+        if let Some(session) = &self.wsl {
+            stop_wsl_linux_host(session);
+        }
         if let Ok(mut guard) = self.child.lock() {
             if let Some(mut child) = guard.take() {
                 kill_process_tree(child.id());
@@ -132,6 +145,7 @@ pub async fn spawn_web_host(
             &child_handle,
             &stderr_lines,
             Duration::from_secs(120),
+            None,
         )
         .await
         {
@@ -163,12 +177,223 @@ pub async fn spawn_web_host(
             port,
             web_url,
             disabled_plugins,
+            wsl: None,
             child: child_handle,
             #[cfg(windows)]
             job: Mutex::new(job),
         });
     }
     Err(last_error)
+}
+
+/// Spawn `dsh web` as a Linux Node process inside WSL and wait until HTTP responds.
+///
+/// `runner` is reserved for callers that already hold a `WslRunner`; the long-lived
+/// Host is spawned via `wsl.exe` directly so stdout/stderr stay piped.
+#[allow(dead_code)] // wired by Task 8 boot branch
+pub async fn spawn_wsl_web_host(
+    paths: &WslRuntimePaths,
+    overlay: Option<&HostOverlay>,
+    _runner: &dyn WslRunner,
+) -> Result<HostHandle, String> {
+    reclaim_stale_host(&host_pid_path());
+    let port = pick_port(DEFAULT_WEB_PORT)?;
+    let web_url = format!("http://127.0.0.1:{port}/");
+
+    let spec = WslLaunchSpec {
+        distro: paths.distro.clone(),
+        linux_node: paths.linux_node.clone(),
+        linux_cli: paths.linux_cli.clone(),
+        linux_harness_root: paths.linux_harness_root.clone(),
+        linux_dsh_home: paths.linux_dsh_home.clone(),
+        linux_path: paths.linux_path.clone(),
+        linux_patch: paths.linux_patch.clone(),
+        notify_url: overlay.map(|o| o.notify_url.clone()),
+        port,
+        host: "127.0.0.1".into(),
+    };
+
+    boot_log::info(&format!(
+        "spawning wsl dsh web distro={} node={} cli={} port={port}",
+        paths.distro, paths.linux_node, paths.linux_cli
+    ));
+
+    let command = build_wsl_web_command(&spec)?;
+    let mut child = spawn_wsl_child(&command)?;
+    let stub_pid = child.id();
+    #[cfg(windows)]
+    let job = attach_host_job(&child);
+
+    let stderr_lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let linux_pid = take_linux_pid_and_drain_stderr(&mut child, &stderr_lines)?;
+
+    if let Err(error) = write_host_pid(
+        &host_pid_path(),
+        stub_pid,
+        Path::new(&paths.linux_node),
+    ) {
+        boot_log::info(&format!("host pid file skipped: {error}"));
+    }
+
+    if let Some(stdout) = child.stdout.take() {
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for _ in reader.lines().flatten() {}
+        });
+    }
+
+    let child_handle = Arc::new(Mutex::new(Some(child)));
+    let wsl_timeout = "请检查 WSL 的 localhost 转发（localhostForwarding）。";
+    if let Err(error) = wait_for_http(
+        &web_url,
+        &child_handle,
+        &stderr_lines,
+        Duration::from_secs(120),
+        Some(wsl_timeout),
+    )
+    .await
+    {
+        let session = WslSession {
+            distro: paths.distro.clone(),
+            linux_pid,
+        };
+        stop_wsl_linux_host(&session);
+        if let Ok(mut guard) = child_handle.lock() {
+            if let Some(mut child) = guard.take() {
+                kill_process_tree(child.id());
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+        let _ = std::fs::remove_file(host_pid_path());
+        return Err(error);
+    }
+
+    boot_log::info(&format!(
+        "health check passed url={web_url} linux_pid={linux_pid}"
+    ));
+
+    Ok(HostHandle {
+        port,
+        web_url,
+        disabled_plugins: Vec::new(),
+        wsl: Some(WslSession {
+            distro: paths.distro.clone(),
+            linux_pid,
+        }),
+        child: child_handle,
+        #[cfg(windows)]
+        job: Mutex::new(job),
+    })
+}
+
+/// Parse the Linux Host pid from the handshake line written to stderr.
+pub fn parse_linux_pid_from_stderr(stderr: &str) -> Option<u32> {
+    let first = stderr.lines().next()?.trim();
+    if first.is_empty() {
+        return None;
+    }
+    first.parse().ok()
+}
+
+/// `wsl.exe` argv that sends `SIGTERM` to the Linux Host pid (never `--terminate`).
+pub fn wsl_stop_args(distro: &str, linux_pid: u32) -> Vec<String> {
+    vec![
+        "-d".into(),
+        distro.into(),
+        "--exec".into(),
+        "kill".into(),
+        "-TERM".into(),
+        linux_pid.to_string(),
+    ]
+}
+
+fn wsl_kill_args(distro: &str, linux_pid: u32) -> Vec<String> {
+    vec![
+        "-d".into(),
+        distro.into(),
+        "--exec".into(),
+        "kill".into(),
+        "-KILL".into(),
+        linux_pid.to_string(),
+    ]
+}
+
+fn wsl_pid_alive_args(distro: &str, linux_pid: u32) -> Vec<String> {
+    vec![
+        "-d".into(),
+        distro.into(),
+        "--exec".into(),
+        "kill".into(),
+        "-0".into(),
+        linux_pid.to_string(),
+    ]
+}
+
+fn stop_wsl_linux_host(session: &WslSession) {
+    let _ = run_wsl_argv(&wsl_stop_args(&session.distro, session.linux_pid));
+    std::thread::sleep(Duration::from_secs(3));
+    if wsl_linux_pid_alive(&session.distro, session.linux_pid) {
+        let _ = run_wsl_argv(&wsl_kill_args(&session.distro, session.linux_pid));
+    }
+}
+
+fn wsl_linux_pid_alive(distro: &str, linux_pid: u32) -> bool {
+    run_wsl_argv(&wsl_pid_alive_args(distro, linux_pid))
+        .map(|code| code == 0)
+        .unwrap_or(false)
+}
+
+fn run_wsl_argv(args: &[String]) -> Result<i32, String> {
+    let mut cmd = Command::new("wsl.exe");
+    cmd.args(args);
+    hide_console(&mut cmd);
+    let status = cmd
+        .status()
+        .map_err(|e| format!("无法执行 wsl.exe: {e}"))?;
+    Ok(status.code().unwrap_or(-1))
+}
+
+#[allow(dead_code)] // used by spawn_wsl_web_host (Task 8)
+fn spawn_wsl_child(command: &super::wsl::WslCommand) -> Result<Child, String> {
+    let mut cmd = Command::new(&command.program);
+    cmd.args(&command.args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    hide_console(&mut cmd);
+    cmd.spawn()
+        .map_err(|e| format!("无法启动 WSL dsh web: {e}"))
+}
+
+#[allow(dead_code)] // used by spawn_wsl_web_host (Task 8)
+fn take_linux_pid_and_drain_stderr(
+    child: &mut Child,
+    stderr_lines: &Arc<Mutex<Vec<String>>>,
+) -> Result<u32, String> {
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "WSL Host stderr 不可用".to_string())?;
+    let mut reader = BufReader::new(stderr);
+    let mut first = String::new();
+    reader
+        .read_line(&mut first)
+        .map_err(|e| format!("无法读取 WSL Host pid: {e}"))?;
+    let linux_pid = parse_linux_pid_from_stderr(&first).ok_or_else(|| {
+        format!(
+            "无法解析 WSL Host pid（handshake）: {}",
+            first.trim_end()
+        )
+    })?;
+    if let Ok(mut guard) = stderr_lines.lock() {
+        let trimmed = first.trim_end();
+        if !trimmed.is_empty() {
+            guard.push(trimmed.to_string());
+        }
+    }
+    let lines = Arc::clone(stderr_lines);
+    std::thread::spawn(move || drain_lines(reader, lines));
+    Ok(linux_pid)
 }
 
 /// Write the rescue `--patch` overlay that disables the given plugin entry ids.
@@ -287,6 +512,7 @@ async fn wait_for_http(
     child: &Arc<Mutex<Option<Child>>>,
     stderr_lines: &Arc<Mutex<Vec<String>>>,
     timeout: Duration,
+    timeout_detail: Option<&str>,
 ) -> Result<(), String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
@@ -301,7 +527,10 @@ async fn wait_for_http(
             if let Some(code) = child_exit_code(child) {
                 return Err(format_child_failure(stderr_lines, code));
             }
-            return Err(format!("等待 {url} 就绪超时"));
+            return Err(match timeout_detail {
+                Some(detail) => format!("等待 {url} 就绪超时。{detail}"),
+                None => format!("等待 {url} 就绪超时"),
+            });
         }
 
         if let Some(code) = child_exit_code(child) {
@@ -349,7 +578,9 @@ fn port_free(port: u16) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{failing_loader_entry, rescue_patch_body};
+    use super::{
+        failing_loader_entry, parse_linux_pid_from_stderr, rescue_patch_body, wsl_stop_args,
+    };
 
     #[test]
     fn extracts_the_plugin_id_from_a_loader_failure() {
@@ -371,5 +602,19 @@ invalid plugin, expect function or object with an \"apply\" method, received obj
             rescue_patch_body(&["a-b".to_string(), "c.d".to_string()]),
             "- id: a-b\n  disabled: true\n- id: c.d\n  disabled: true\n"
         );
+    }
+
+    #[test]
+    fn parses_linux_pid_from_first_stderr_line() {
+        assert_eq!(parse_linux_pid_from_stderr("43210\nready\n"), Some(43210));
+        assert_eq!(parse_linux_pid_from_stderr("not-a-pid\n"), None);
+    }
+
+    #[test]
+    fn stop_argv_is_kill_not_terminate() {
+        let args = wsl_stop_args("Ubuntu", 43210);
+        assert_eq!(args[0], "-d");
+        assert!(args.contains(&"kill".into()));
+        assert!(!args.iter().any(|a| a == "--terminate"));
     }
 }

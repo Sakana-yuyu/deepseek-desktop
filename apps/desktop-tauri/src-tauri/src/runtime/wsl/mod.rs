@@ -5,8 +5,7 @@ mod launch;
 mod path;
 pub mod provision;
 
-// Re-exported for later WSL host tasks (spawn/provision).
-#[allow(unused_imports)] // consumed by later spawn/provision tasks
+// Consumed by `supervisor::spawn_wsl_web_host`.
 pub use launch::{build_wsl_web_command, WslCommand, WslLaunchSpec};
 
 // Re-exported for later WSL host tasks (provision/spawn).
@@ -14,14 +13,14 @@ pub use launch::{build_wsl_web_command, WslCommand, WslLaunchSpec};
 pub use path::windows_to_wsl_mount;
 
 // Re-exported for later WSL host tasks (`crate::runtime::wsl::select_distro`).
-#[allow(unused_imports)] // consumed by later spawn/provision tasks
+#[allow(unused_imports)] // consumed by later spawn/boot tasks
 pub use distro::{
     decode_wsl_list_stdout, is_skipped_distro, parse_wsl_list, select_distro, WslDistro,
     WslSelectError,
 };
 
 // Re-exported for later WSL host tasks (runtime boot / spawn).
-#[allow(unused_imports)] // consumed by later spawn/boot tasks
+#[allow(unused_imports)] // consumed by Task 8 boot
 pub use provision::{ensure_wsl_runtime, WslRuntimePaths};
 
 /// Captured stdout/stderr/exit code from one `wsl.exe` invocation.
