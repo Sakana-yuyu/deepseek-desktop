@@ -15,6 +15,9 @@ const ERR_HARNESS: &str = "无法在 WSL 中安装 harness 树";
 const ERR_NODE: &str = "无法在 WSL 中安装 Node";
 const ERR_PNPM: &str = "无法在 WSL 中执行 pnpm install";
 const PNPM_TIMEOUT_SECS: &str = "600";
+/// Linux-only PATH for `command -v node` so WSL does not surface Windows `node.exe`.
+const LINUX_PROBE_PATH: &str =
+    "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
 /// Linux paths for a WSL-mode Host after provisioning.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -134,11 +137,12 @@ async fn ensure_linux_node(
         return Ok(node);
     }
 
-    let which = wsl_exec(runner, distro, &["/bin/sh", "-c", "command -v node"])
+    let which_script = format!("PATH={LINUX_PROBE_PATH} command -v node");
+    let which = wsl_exec(runner, distro, &["/bin/sh", "-c", &which_script])
         .map_err(|e| format!("{ERR_NODE}: {e}"))?;
     if which.code == 0 {
         let path = String::from_utf8_lossy(&which.stdout).trim().to_string();
-        if !path.is_empty() {
+        if !path.is_empty() && !is_windows_hosted_node_path(&path) {
             if let Some(node) = probe_compatible_node(runner, distro, &path)? {
                 return Ok(node);
             }
@@ -148,11 +152,22 @@ async fn ensure_linux_node(
     install_linux_node(runner, distro, preferred_node, linux_runtime_root, progress).await
 }
 
+/// True when `path` looks like a Windows Node image reached via `/mnt` or `.exe`.
+fn is_windows_hosted_node_path(path: &str) -> bool {
+    path.contains('\\')
+        || path.to_ascii_lowercase().ends_with(".exe")
+        || path.starts_with("/mnt/")
+}
+
 fn probe_compatible_node(
     runner: &dyn WslRunner,
     distro: &str,
     node_path: &str,
 ) -> Result<Option<String>, String> {
+    if is_windows_hosted_node_path(node_path) {
+        return Ok(None);
+    }
+
     if node_path != "node" {
         let exists = wsl_exec(runner, distro, &["test", "-x", node_path])
             .map_err(|e| format!("{ERR_NODE}: {e}"))?;
@@ -182,6 +197,11 @@ async fn install_linux_node(
     linux_runtime_root: &str,
     progress: &impl Fn(ProvisionEvent),
 ) -> Result<String, String> {
+    // Re-check preferred before any download (e.g. prior extract already on disk).
+    if let Some(node) = probe_compatible_node(runner, distro, preferred_node)? {
+        return Ok(node);
+    }
+
     let arch = linux_arch(runner, distro)?;
     let spec = node_archive_spec_for(DEFAULT_NODE_VERSION, "linux", &arch)
         .map_err(|e| format!("{ERR_NODE}: {e}"))?;
@@ -393,10 +413,10 @@ fn require_success(out: &WslOutput, prefix: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::ensure_wsl_runtime;
+    use super::{ensure_wsl_runtime, LINUX_PROBE_PATH};
     use crate::runtime::wsl::{WslOutput, WslRunner};
     use std::fs;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
     use std::sync::Mutex;
 
     /// Fake runner: scripted replies keyed by args prefix; records every invocation.
@@ -529,7 +549,7 @@ mod tests {
                     "--exec".into(),
                     "/bin/sh".into(),
                     "-c".into(),
-                    "command -v node".into(),
+                    format!("PATH={LINUX_PROBE_PATH} command -v node"),
                 ],
                 ok_out("/usr/bin/node\n"),
             ),
@@ -679,6 +699,154 @@ mod tests {
 
         let _ = fs::remove_dir_all(&bundled);
         let _ = fs::remove_dir_all(&windows_home);
-        let _ = Path::new("");
+    }
+
+    #[test]
+    fn rejects_windows_node_from_command_v_and_uses_linux_runtime() {
+        let bundled = temp_dir("bundled-win-node");
+        let windows_home = temp_dir("win-home-win-node");
+        let hash = "def456";
+        let harness_bin = format!(
+            "/home/u/.local/share/dsh-desktop/harness-versions/{hash}/apps/cli/lib/bin.js"
+        );
+        let preferred_node = "/home/u/.local/share/dsh-desktop/runtime/node/bin/node";
+        let windows_node = "/mnt/c/Program Files/nodejs/node.exe";
+
+        let runner = Scripted::new(vec![
+            (
+                vec![
+                    "-d".into(),
+                    "Ubuntu".into(),
+                    "--exec".into(),
+                    "printenv".into(),
+                    "HOME".into(),
+                ],
+                ok_out("/home/u\n"),
+            ),
+            (
+                vec![
+                    "-d".into(),
+                    "Ubuntu".into(),
+                    "--exec".into(),
+                    "test".into(),
+                    "-f".into(),
+                    harness_bin,
+                ],
+                ok_out(""),
+            ),
+            // First preferred probe: missing.
+            (
+                vec![
+                    "-d".into(),
+                    "Ubuntu".into(),
+                    "--exec".into(),
+                    "test".into(),
+                    "-x".into(),
+                    preferred_node.into(),
+                ],
+                fail_out(),
+            ),
+            // WSL PATH pollution: Windows node.exe.
+            (
+                vec![
+                    "-d".into(),
+                    "Ubuntu".into(),
+                    "--exec".into(),
+                    "/bin/sh".into(),
+                    "-c".into(),
+                    format!("PATH={LINUX_PROBE_PATH} command -v node"),
+                ],
+                ok_out(&format!("{windows_node}\n")),
+            ),
+            // install_linux_node re-probes preferred (already extracted) — no download.
+            (
+                vec![
+                    "-d".into(),
+                    "Ubuntu".into(),
+                    "--exec".into(),
+                    "test".into(),
+                    "-x".into(),
+                    preferred_node.into(),
+                ],
+                ok_out(""),
+            ),
+            (
+                vec![
+                    "-d".into(),
+                    "Ubuntu".into(),
+                    "--exec".into(),
+                    preferred_node.into(),
+                    "-v".into(),
+                ],
+                ok_out("v22.19.0\n"),
+            ),
+            (
+                vec!["-d".into(), "Ubuntu".into(), "--exec".into(), "timeout".into()],
+                ok_out(""),
+            ),
+            // Linux home already seeded — skip credential copy.
+            (
+                vec![
+                    "-d".into(),
+                    "Ubuntu".into(),
+                    "--exec".into(),
+                    "test".into(),
+                    "-f".into(),
+                    "/home/u/.dsh/.credentials.yaml".into(),
+                ],
+                ok_out(""),
+            ),
+            (
+                vec![
+                    "-d".into(),
+                    "Ubuntu".into(),
+                    "--exec".into(),
+                    "test".into(),
+                    "-f".into(),
+                    "/home/u/.dsh/.env".into(),
+                ],
+                ok_out(""),
+            ),
+        ]);
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let paths = rt
+            .block_on(ensure_wsl_runtime(
+                &runner,
+                "Ubuntu",
+                &bundled,
+                hash,
+                &windows_home,
+                None,
+                None,
+                |_| {},
+            ))
+            .expect("ensure_wsl_runtime");
+
+        assert_eq!(paths.linux_node, preferred_node);
+        assert!(paths.linux_node.ends_with("/bin/node"));
+        assert!(!paths.linux_node.to_ascii_lowercase().ends_with("node.exe"));
+
+        let recorded = runner.recorded();
+        for args in &recorded {
+            assert!(
+                args.iter()
+                    .all(|a| !a.to_ascii_lowercase().contains("node.exe")),
+                "recorded argv must never contain node.exe: {args:?}"
+            );
+        }
+        assert!(
+            recorded.iter().any(|args| {
+                args.iter()
+                    .any(|a| a.contains("command -v node") && a.contains(LINUX_PROBE_PATH))
+            }),
+            "command -v must use Linux-only PATH, recorded: {recorded:?}"
+        );
+
+        let _ = fs::remove_dir_all(&bundled);
+        let _ = fs::remove_dir_all(&windows_home);
     }
 }
