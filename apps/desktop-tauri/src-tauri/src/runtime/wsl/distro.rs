@@ -256,4 +256,84 @@ mod tests {
             "没有可用的 WSL2 发行版（已跳过 docker-desktop）。"
         );
     }
+
+    fn utf16le_bom(text: &str) -> Vec<u8> {
+        let mut out = vec![0xFF, 0xFE];
+        out.extend(utf16le(text));
+        out
+    }
+
+    #[test]
+    fn decodes_utf16le_with_bom() {
+        let raw = utf16le_bom(
+            "  NAME              STATE           VERSION\r\n* Ubuntu            Running         2\r\n",
+        );
+        let text = decode_wsl_list_stdout(&raw);
+        let list = parse_wsl_list(&text);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "Ubuntu");
+        assert_eq!(list[0].version, 2);
+        assert!(list[0].is_default);
+    }
+
+    #[test]
+    fn decodes_utf8_list() {
+        let raw = b"  NAME              STATE           VERSION\n* Ubuntu            Running         2\n";
+        let text = decode_wsl_list_stdout(raw);
+        let list = parse_wsl_list(&text);
+        let selected = select_distro(&list, None).unwrap();
+        assert_eq!(selected.name, "Ubuntu");
+        assert!(selected.is_default);
+    }
+
+    #[test]
+    fn skips_docker_desktop_data() {
+        assert!(is_skipped_distro("docker-desktop"));
+        assert!(is_skipped_distro("docker-desktop-data"));
+        assert!(!is_skipped_distro("Ubuntu"));
+
+        let text = "* docker-desktop-data  Running  2\n  Ubuntu  Stopped  2\n";
+        let err = select_distro(&parse_wsl_list(text), None).unwrap_err();
+        assert!(matches!(err, WslSelectError::DockerDefault(_)));
+        assert!(err.splash_message().contains("wsl --set-default"));
+    }
+
+    #[test]
+    fn rejects_requested_wsl1() {
+        let list = parse_wsl_list("* Ubuntu  Running  1\n");
+        let err = select_distro(&list, Some("Ubuntu")).unwrap_err();
+        assert!(matches!(err, WslSelectError::Wsl1Only(_)));
+        assert!(err.splash_message().contains("WSL1"));
+    }
+
+    #[test]
+    fn rejects_named_missing() {
+        let list = parse_wsl_list("* Ubuntu  Running  2\n");
+        let err = select_distro(&list, Some("Debian")).unwrap_err();
+        match &err {
+            WslSelectError::NamedMissing { requested, message } => {
+                assert_eq!(requested, "Debian");
+                assert_eq!(
+                    message,
+                    "找不到 WSL 发行版 Debian。请检查 desktop-settings.json 的 wslDistro。"
+                );
+            }
+            other => panic!("expected NamedMissing, got {other:?}"),
+        }
+        assert_eq!(
+            err.splash_message(),
+            "找不到 WSL 发行版 Debian。请检查 desktop-settings.json 的 wslDistro。"
+        );
+    }
+
+    #[test]
+    fn rejects_none_eligible() {
+        let text = "  docker-desktop       Running  2\n  docker-desktop-data  Running  2\n";
+        let err = select_distro(&parse_wsl_list(text), None).unwrap_err();
+        assert!(matches!(err, WslSelectError::NoneEligible(_)));
+        assert_eq!(
+            err.splash_message(),
+            "没有可用的 WSL2 发行版（已跳过 docker-desktop）。"
+        );
+    }
 }
