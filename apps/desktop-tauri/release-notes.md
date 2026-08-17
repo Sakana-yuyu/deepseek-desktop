@@ -1,4 +1,4 @@
-# DeepSeek Harness Desktop 0.1.0-rc.5-0.5
+# DeepSeek Harness Desktop 0.1.0-rc.5-0.6
 
 ## English
 
@@ -8,11 +8,11 @@ The installer contains a trimmed Harness source tree without `node_modules`. On 
 
 ### What's new
 
-- The splash is a compact transparent window: a borderless radial frost, the official fish mark, a white DeepSeek wordmark, and a progress bar, without window scrollbars.
-- On Windows, Host and CLI children stay silent when the parent has no visible console, so `dsh` / Node / pnpm no longer flash a black window during boot or plugin install.
-- Quit (tray Quit, a saved Exit close, or updater restart) stops the Host Node process tree. The next launch reaps a leftover host if the recorded image still matches.
-- If `dsh web` exits because a loader plugin fails, the shell disables that entry and retries the Host.
-- Minimize to tray still keeps the Host running.
+- Native chrome (splash, tray, close dialog, boot status) follows the OS UI language: `zh*` is Chinese, everything else is English. The embedded web client still has its own Settings language.
+- The tray can install the Sakana plugin catalog into the live Host `web` profile and restart so the new layer loads.
+- Repeat launches reuse the recorded Node / pnpm and skip `pnpm install` when the harness tree is still intact, including when those binaries are host paths.
+- Windows can run the Host inside the default WSL2 distro from the tray Agent environment toggle. Restart is required; Windows and WSL homes stay separate.
+- Quit still stops the Host process tree; minimize to tray keeps it running.
 
 Windows installation closes a running desktop process before replacing files and refreshes an existing desktop shortcut with the versioned DeepSeek fish icon.
 
@@ -32,11 +32,11 @@ DeepSeek Harness Desktop 是现有 `dsh web` 界面的 Tauri/WebView 外壳。
 
 ### 更新内容
 
-- 启动页改为紧贴内容的透明窗口：无边框径向毛玻璃、官方鱼形标志、白色 DeepSeek 字标和进度条，出错时也不再出现窗口滚动条。
-- Windows 上，父进程没有可见控制台时，Host 与 CLI 子进程保持静默，启动或安装插件时 `dsh` / Node / pnpm 不再闪出黑框。
-- 退出（托盘退出、已保存的“退出程序”、或更新后重启）会停止 Host 的 Node 进程树；下次启动若记录的映像仍在，会回收上次残留的 Host。
-- 若 `dsh web` 因某个 loader 插件加载失败而退出，外壳会禁用该条目并重试 Host。
-- 最小化到托盘时 Host 仍保持运行。
+- 原生界面（启动页、托盘、关闭对话框、启动状态）跟随操作系统语言：`zh*` 用中文，其余用英语。嵌入的 web 客户端仍使用自己的 Settings 语言。
+- 托盘可把 Sakana 插件库装进当前 Host 的 `web` profile，并重启以加载新层。
+- 再次启动会复用已记录的 Node / pnpm；harness 树仍完整时跳过 `pnpm install`，主机上的 Node / pnpm 路径同样适用。
+- Windows 可从托盘的 Agent 环境切换，在默认 WSL2 发行版里跑 Host。需要重启；Windows 与 WSL 主目录互相独立。
+- 退出仍会停止 Host 进程树；最小化到托盘时 Host 继续运行。
 
 Windows 安装会先关闭正在运行的桌面进程再替换文件，并用带版本号的 DeepSeek 鱼形图标刷新已有桌面快捷方式。
 
