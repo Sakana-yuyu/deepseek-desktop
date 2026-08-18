@@ -1,4 +1,4 @@
-# DeepSeek Harness Desktop 0.1.0-rc.5-0.6
+# DeepSeek Harness Desktop 0.1.0-rc.7-0.1
 
 ## English
 
@@ -8,11 +8,8 @@ The installer contains a trimmed Harness source tree without `node_modules`. On 
 
 ### What's new
 
-- Native chrome (splash, tray, close dialog, boot status) follows the OS UI language: `zh*` is Chinese, everything else is English. The embedded web client still has its own Settings language.
-- The tray can install the Sakana plugin catalog into the live Host `web` profile and restart so the new layer loads.
-- Repeat launches reuse the recorded Node / pnpm and skip `pnpm install` when the harness tree is still intact, including when those binaries are host paths.
-- Windows can run the Host inside the default WSL2 distro from the tray Agent environment toggle. Restart is required; Windows and WSL homes stay separate.
-- Quit still stops the Host process tree; minimize to tray keeps it running.
+- Refreshes the bundled Harness source to upstream `dsh@0.1.0-rc.7`.
+- Preserves native desktop chrome, tray controls, signed automatic updates, completion notifications, and the Windows WSL Host option.
 
 Windows installation closes a running desktop process before replacing files and refreshes an existing desktop shortcut with the versioned DeepSeek fish icon.
 
@@ -32,11 +29,8 @@ DeepSeek Harness Desktop 是现有 `dsh web` 界面的 Tauri/WebView 外壳。
 
 ### 更新内容
 
-- 原生界面（启动页、托盘、关闭对话框、启动状态）跟随操作系统语言：`zh*` 用中文，其余用英语。嵌入的 web 客户端仍使用自己的 Settings 语言。
-- 托盘可把 Sakana 插件库装进当前 Host 的 `web` profile，并重启以加载新层。
-- 再次启动会复用已记录的 Node / pnpm；harness 树仍完整时跳过 `pnpm install`，主机上的 Node / pnpm 路径同样适用。
-- Windows 可从托盘的 Agent 环境切换，在默认 WSL2 发行版里跑 Host。需要重启；Windows 与 WSL 主目录互相独立。
-- 退出仍会停止 Host 进程树；最小化到托盘时 Host 继续运行。
+- 内置 Harness 源码更新至上游 `dsh@0.1.0-rc.7`。
+- 保留原生桌面界面、托盘控制、签名自动更新、任务完成提醒和 Windows WSL Host 选项。
 
 Windows 安装会先关闭正在运行的桌面进程再替换文件，并用带版本号的 DeepSeek 鱼形图标刷新已有桌面快捷方式。
 
