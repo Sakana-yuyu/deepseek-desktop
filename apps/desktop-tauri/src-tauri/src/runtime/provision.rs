@@ -92,21 +92,19 @@ pub async fn ensure_runtime(
         &isolated_home,
     )));
 
-    if manifest_ready(
-        &manifest_path,
-        &bundled,
-        &preferred_node,
-        &preferred_pnpm,
-        &harness_root,
-        &cli_entry,
-    ) {
+    if manifest_ready(&manifest_path, &bundled, &harness_root, &cli_entry) {
         boot_log::info("provision skipped: manifest ready");
         progress(ProvisionEvent::Status(
             i18n::t(Msg::StatusRuntimeReady).into(),
         ));
         progress(ProvisionEvent::Progress(100));
+        // The recorded node may be a host binary outside the desktop runtime
+        // dir; reuse it so a skipped provision can still start the host.
+        let node_binary = recorded_node_path(&manifest_path)
+            .map(PathBuf::from)
+            .unwrap_or(preferred_node);
         return Ok(RuntimePaths {
-            node_binary: preferred_node,
+            node_binary,
             pnpm_binary: preferred_pnpm,
             cli_entry,
             harness_root,
@@ -324,14 +322,10 @@ fn resolve_local_repo() -> Result<RuntimePaths, String> {
 fn manifest_ready(
     manifest_path: &Path,
     bundled: &Path,
-    node_binary: &Path,
-    pnpm_binary: &Path,
     harness_root: &Path,
     cli_entry: &Path,
 ) -> bool {
     if !manifest_path.is_file()
-        || !node_binary.is_file()
-        || !pnpm_binary.is_file()
         || !cli_entry.is_file()
         || !harness_root.join("node_modules").join(".pnpm").is_dir()
     {
@@ -347,8 +341,17 @@ fn manifest_ready(
     let Ok(bundle_hash) = read_bundle_hash(bundled) else {
         return false;
     };
-    bundle_hash == parsed["bundleSha256"].as_str().unwrap_or("")
-        && node_matches_manifest(node_binary, &parsed)
+    if bundle_hash != parsed["bundleSha256"].as_str().unwrap_or("") {
+        return false;
+    }
+
+    // The recorded Node may be a host binary (e.g. an nvm-managed node.exe)
+    // rather than the desktop-managed runtime node. Only the recorded path
+    // proves the previous provision is still valid.
+    let Some(node_path) = parsed["nodePath"].as_str() else {
+        return false;
+    };
+    node_matches_manifest(Path::new(node_path), &parsed)
 }
 
 fn node_matches_manifest(node_binary: &Path, parsed: &serde_json::Value) -> bool {
@@ -359,6 +362,13 @@ fn node_matches_manifest(node_binary: &Path, parsed: &serde_json::Value) -> bool
         return meta.len() == bytes;
     }
     true
+}
+
+/// The Node path recorded by the previous provision, if any.
+fn recorded_node_path(manifest_path: &Path) -> Option<String> {
+    let raw = fs::read_to_string(manifest_path).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    parsed["nodePath"].as_str().map(str::to_string)
 }
 
 /// Rebuild `RuntimePaths` from whatever Node / CLI already exists on disk.
@@ -941,7 +951,7 @@ fn pnpm_install_harness(
 #[cfg(test)]
 mod tests {
     use super::{
-        harness_root_for_bundle, node_archive_spec_for, node_matches_manifest,
+        harness_root_for_bundle, manifest_ready, node_archive_spec_for, node_matches_manifest,
         safe_archive_relative_path,
     };
     use std::fs;
@@ -1035,6 +1045,88 @@ mod tests {
             &serde_json::json!({ "nodeBytes": bytes + 1 })
         ));
         assert!(node_matches_manifest(&node, &serde_json::json!({})));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn skips_provision_when_recorded_host_node_still_matches() {
+        let dir = std::env::temp_dir().join(format!("dsh-manifest-ready-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let harness = dir.join("harness");
+        let node_modules = harness.join("node_modules").join(".pnpm");
+        let _ = fs::create_dir_all(&node_modules);
+        let cli = harness.join("apps").join("cli").join("lib").join("bin.js");
+        let _ = fs::create_dir_all(cli.parent().unwrap());
+        fs::write(&cli, b"cli").unwrap();
+
+        let node = dir.join("node.exe");
+        fs::write(&node, b"node-binary").unwrap();
+        let bytes = fs::metadata(&node).unwrap().len();
+
+        let bundled = dir.join("bundled");
+        let _ = fs::create_dir_all(&bundled);
+        fs::write(
+            bundled.join(".bundle-manifest.json"),
+            r#"{"contentSha256":"0123456789abcdef0123456789abcdef"}"#,
+        )
+        .unwrap();
+
+        let manifest_path = dir.join("manifest.json");
+        fs::write(
+            &manifest_path,
+            format!(
+                r#"{{"bundleSha256":"0123456789abcdef0123456789abcdef","nodePath":"{}","nodeBytes":{}}}"#,
+                node.display(),
+                bytes
+            ),
+        )
+        .unwrap();
+
+        assert!(manifest_ready(
+            &manifest_path,
+            &bundled,
+            &harness,
+            &cli,
+        ));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reprovisions_when_recorded_node_is_missing() {
+        let dir = std::env::temp_dir().join(format!("dsh-manifest-stale-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let harness = dir.join("harness");
+        let node_modules = harness.join("node_modules").join(".pnpm");
+        let _ = fs::create_dir_all(&node_modules);
+        let cli = harness.join("apps").join("cli").join("lib").join("bin.js");
+        let _ = fs::create_dir_all(cli.parent().unwrap());
+        fs::write(&cli, b"cli").unwrap();
+
+        let bundled = dir.join("bundled");
+        let _ = fs::create_dir_all(&bundled);
+        fs::write(
+            bundled.join(".bundle-manifest.json"),
+            r#"{"contentSha256":"0123456789abcdef0123456789abcdef"}"#,
+        )
+        .unwrap();
+
+        // The recorded node no longer exists (e.g. an nvm version removed).
+        let manifest_path = dir.join("manifest.json");
+        fs::write(
+            &manifest_path,
+            format!(
+                r#"{{"bundleSha256":"0123456789abcdef0123456789abcdef","nodePath":"{}","nodeBytes":1234}}}"#,
+                dir.join("missing-node.exe").display()
+            ),
+        )
+        .unwrap();
+
+        assert!(!manifest_ready(
+            &manifest_path,
+            &bundled,
+            &harness,
+            &cli,
+        ));
         let _ = fs::remove_dir_all(&dir);
     }
 }
