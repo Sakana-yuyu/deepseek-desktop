@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { dirname, join, relative, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const desktopRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const repoRoot = join(desktopRoot, '..', '..')
@@ -19,9 +19,46 @@ const skipDirNames = new Set([
   'tests', 'test', '__tests__', 'dist-test',
 ])
 
+const trimmedPackages = [
+  'vendor/*',
+  'packages/*/*',
+  'native/landlock-run',
+  'native/landlock-run/packages/*',
+  'apps/cli',
+  'apps/web',
+]
+
 const skipPackageGroups = new Set(['examples', 'test-support'])
 
 const skipFileSuffixes = ['.spec.ts', '.e2e.ts', '.snapshot.ts']
+
+/**
+ * Derive the bundled pnpm-workspace.yaml from the repository's own file,
+ * replacing only the `packages:` membership. Every other section —
+ * `patchedDependencies`, `allowBuilds`, overrides — is copied verbatim so a
+ * stale hardcoded copy can never disagree with the source tree the bundle
+ * ships; pnpm treats a declared-but-unused patch as a hard install error.
+ *
+ * @param {string} sourceYaml
+ * @returns {string}
+ */
+export function buildTrimmedWorkspaceYaml(sourceYaml) {
+  const lines = sourceYaml.split(/\r?\n/)
+  const packagesIndex = lines.findIndex(line => /^packages:\s*$/.test(line))
+  if (packagesIndex === -1) {
+    throw new Error('pnpm-workspace.yaml has no packages: block to trim')
+  }
+  let end = packagesIndex + 1
+  while (end < lines.length && (lines[end].trim() === '' || /^[ \t]/.test(lines[end]))) {
+    end += 1
+  }
+  const trimmedBlock = [
+    'packages:',
+    ...trimmedPackages.map(name => `  - ${name}`),
+    '',
+  ]
+  return [...lines.slice(0, packagesIndex), ...trimmedBlock, ...lines.slice(end)].join('\n')
+}
 
 /** @param {string} sourceRoot @param {string} source */
 function shouldCopyEntry(sourceRoot, source) {
@@ -168,6 +205,7 @@ function removeTree(dir) {
   }
 }
 
+function main() {
 assertBuiltArtifacts()
 removeTree(outRoot)
 mkdirSync(outRoot, { recursive: true })
@@ -196,37 +234,9 @@ for (const group of readdirSync(packagesRoot, { withFileTypes: true })) {
   }
 }
 
-const trimmedWorkspace = `packages:
-  - vendor/*
-  - packages/*/*
-  - native/landlock-run
-  - native/landlock-run/packages/*
-  - apps/cli
-  - apps/web
-
-linkWorkspacePackages: true
-
-overrides:
-  '@deepseek-ai/cosmokit': 'link:vendor/cosmokit'
-  '@deepseek-ai/schemastery': 'link:vendor/schemastery'
-
-peerDependencyRules:
-  allowedVersions:
-    typescript: '>=5 <7'
-
-allowBuilds:
-  esbuild: true
-  lefthook: true
-  node-pty: true
-  '@google/genai': false
-  protobufjs: false
-  node-addon-require-builtin: false
-  koffi: true
-  '@deepseek-ai/dsh-subprocess-local@file:packages/subprocess/subprocess-local': true
-
-patchedDependencies:
-  node-pty@1.1.0: patches/node-pty@1.1.0.patch
-`
+const trimmedWorkspace = buildTrimmedWorkspaceYaml(
+  readFileSync(join(repoRoot, 'pnpm-workspace.yaml'), 'utf8'),
+)
 writeFileSync(join(outRoot, 'pnpm-workspace.yaml'), trimmedWorkspace)
 
 const rootPkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'))
@@ -250,3 +260,9 @@ writeFileSync(join(outRoot, '.bundle-manifest.json'), `${JSON.stringify(manifest
 
 console.log(`bundle-harness-source: wrote ${outRoot}`)
 console.log(`bundle-harness-source: sha256=${manifest.contentSha256}`)
+}
+
+const isDirectRun = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href
+if (isDirectRun) {
+  main()
+}

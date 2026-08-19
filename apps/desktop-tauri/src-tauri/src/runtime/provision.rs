@@ -2,6 +2,7 @@ use std::fs::{self, File};
 use std::io::{copy, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant, SystemTime};
 
 use flate2::read::GzDecoder;
 use futures_util::StreamExt;
@@ -39,6 +40,17 @@ enum ArchiveKind {
     TarGz,
     Zip,
 }
+
+/// Provisioning step ceilings. Expiry fails the step into the recovery path
+/// instead of parking the boot splash on a wedged network or subprocess.
+const PNPM_HARNESS_INSTALL_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+const PNPM_GLOBAL_INSTALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const NODE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
+/// Harness trees kept under `harness-versions`: the active tree, the fallback
+/// for a failed provision, and one spare for an older still-running Host.
+const HARNESS_TREES_KEPT: usize = 3;
+
 
 /// Node distribution archive coordinates for a given OS/arch.
 #[derive(Debug)]
@@ -231,6 +243,7 @@ pub async fn ensure_runtime(
     ) {
         boot_log::info(&format!("manifest write skipped: {error}"));
     }
+    gc_harness_versions(&app_root);
 
     progress(ProvisionEvent::Status(
         i18n::t(Msg::StatusRuntimeReady).into(),
@@ -380,13 +393,7 @@ pub fn try_recover_paths(bundled: Option<&Path>) -> Option<RuntimePaths> {
     let harness_root = bundled
         .and_then(|source| read_bundle_hash(source).ok())
         .map(|hash| harness_root_for_bundle(&app_root, &hash))
-        .filter(|path| {
-            path.join("apps")
-                .join("cli")
-                .join("lib")
-                .join("bin.js")
-                .is_file()
-        })
+        .filter(|path| harness_tree_bootable(path))
         .or_else(|| find_existing_harness(&app_root))?;
     let cli_entry = harness_root
         .join("apps")
@@ -407,36 +414,79 @@ pub fn try_recover_paths(bundled: Option<&Path>) -> Option<RuntimePaths> {
     })
 }
 
+/// A harness tree boots the Host only when the prebuilt CLI entry and the
+/// installed dependency store are both present. A freshly seeded tree always
+/// ships `bin.js`, so the dependency store is what separates a bootable tree
+/// from one whose `pnpm install` has not run (or failed).
+fn harness_tree_bootable(root: &Path) -> bool {
+    root.join("apps")
+        .join("cli")
+        .join("lib")
+        .join("bin.js")
+        .is_file()
+        && root.join("node_modules").join(".pnpm").is_dir()
+}
+
+fn mtime_of(path: &Path) -> SystemTime {
+    fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .unwrap_or(SystemTime::UNIX_EPOCH)
+}
+
+/// Order candidate harness trees newest first so recovery prefers the most
+/// recently provisioned tree; equal timestamps fall back to name order.
+fn sort_harness_trees_newest_first(dirs: &mut [PathBuf]) {
+    dirs.sort_by(|a, b| {
+        mtime_of(b)
+            .cmp(&mtime_of(a))
+            .then_with(|| b.cmp(a))
+    });
+}
+
 fn find_existing_harness(app_root: &Path) -> Option<PathBuf> {
     let versions = app_root.join(HARNESS_VERSIONS_DIR);
     if let Ok(entries) = fs::read_dir(&versions) {
         let mut dirs: Vec<PathBuf> = entries
             .flatten()
             .map(|entry| entry.path())
-            .filter(|path| path.is_dir())
+            .filter(|path| path.is_dir() && harness_tree_bootable(path))
             .collect();
-        dirs.sort();
-        dirs.reverse();
-        for dir in dirs {
-            if dir
-                .join("apps")
-                .join("cli")
-                .join("lib")
-                .join("bin.js")
-                .is_file()
-            {
-                return Some(dir);
-            }
+        sort_harness_trees_newest_first(&mut dirs);
+        if let Some(newest) = dirs.first() {
+            return Some(newest.clone());
         }
     }
     let legacy = app_root.join("harness");
-    legacy
-        .join("apps")
-        .join("cli")
-        .join("lib")
-        .join("bin.js")
-        .is_file()
-        .then_some(legacy)
+    harness_tree_bootable(&legacy).then_some(legacy)
+}
+
+/// Delete harness trees beyond the newest kept set. Removal failures are
+/// logged and skipped: an older Host may still hold files open.
+fn gc_harness_versions(app_root: &Path) {
+    let versions = app_root.join(HARNESS_VERSIONS_DIR);
+    let Ok(entries) = fs::read_dir(&versions) else {
+        return;
+    };
+    let mut dirs: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    if dirs.len() <= HARNESS_TREES_KEPT {
+        return;
+    }
+    sort_harness_trees_newest_first(&mut dirs);
+    for stale in &dirs[HARNESS_TREES_KEPT..] {
+        match fs::remove_dir_all(stale) {
+            Ok(()) => boot_log::info(&format!("removed old harness {}", stale.display())),
+            Err(error) => {
+                boot_log::info(&format!(
+                    "old harness removal skipped {}: {error}",
+                    stale.display()
+                ));
+            }
+        }
+    }
 }
 
 pub(crate) fn read_bundle_hash(bundled: &Path) -> Result<String, String> {
@@ -753,6 +803,7 @@ pub(crate) async fn download_file(
 ) -> Result<(), String> {
     let client = reqwest::Client::builder()
         .user_agent("dsh-desktop/0.1")
+        .timeout(NODE_DOWNLOAD_TIMEOUT)
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -780,6 +831,41 @@ pub(crate) async fn download_file(
     Ok(())
 }
 
+/// Spawn `cmd` and wait for its exit status, killing it at `timeout`. The
+/// child's stdio is inherited from this process.
+fn wait_status_with_timeout(
+    cmd: &mut Command,
+    timeout: Duration,
+    label: &str,
+) -> Result<std::process::ExitStatus, String> {
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("{label} 启动失败: {e}"))?;
+    wait_child_with_timeout(&mut child, timeout, label)
+}
+
+fn wait_child_with_timeout(
+    child: &mut std::process::Child,
+    timeout: Duration,
+    label: &str,
+) -> Result<std::process::ExitStatus, String> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+            return Ok(status);
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "{label} 超时（超过 {} 分钟）",
+                timeout.as_secs() / 60
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
 fn install_pnpm(node_binary: &Path, pnpm_home: &Path, version: &str) -> Result<(), String> {
     if pnpm_home.exists() {
         fs::remove_dir_all(pnpm_home).map_err(|e| e.to_string())?;
@@ -803,8 +889,7 @@ fn install_pnpm(node_binary: &Path, pnpm_home: &Path, version: &str) -> Result<(
             .arg("--loglevel=error");
         add_node_to_path(&mut cmd, node_binary)?;
         hide_console(&mut cmd);
-        cmd.status()
-            .map_err(|e| format!("pnpm 安装启动失败: {e}"))?
+        wait_status_with_timeout(&mut cmd, PNPM_GLOBAL_INSTALL_TIMEOUT, "pnpm 安装")?
     } else {
         let npm = which::which("npm")
             .or_else(|_| which::which("npm.cmd"))
@@ -827,8 +912,7 @@ fn install_pnpm(node_binary: &Path, pnpm_home: &Path, version: &str) -> Result<(
             .arg("--loglevel=error");
         add_node_to_path(&mut cmd, node_binary)?;
         hide_console(&mut cmd);
-        cmd.status()
-            .map_err(|e| format!("pnpm 安装启动失败: {e}"))?
+        wait_status_with_timeout(&mut cmd, PNPM_GLOBAL_INSTALL_TIMEOUT, "pnpm 安装")?
     };
 
     if !status.success() {
@@ -922,30 +1006,119 @@ fn pnpm_install_harness(
     };
     configure_pnpm_install(&mut cmd, node_binary, harness_root, &registry)?;
 
-    let output = cmd
-        .output()
+    let mut child = cmd
+        .spawn()
         .map_err(|e| format!("pnpm install 启动失败: {e}"))?;
+    // Drain the pipes on dedicated threads: a chatty install would otherwise
+    // fill the OS pipe buffer and block the child before a deadline can fire.
+    let stdout_handle = spawn_pipe_reader(child.stdout.take());
+    let stderr_handle = spawn_pipe_reader(child.stderr.take());
+    let status =
+        wait_child_with_timeout(&mut child, PNPM_HARNESS_INSTALL_TIMEOUT, "pnpm install")?;
+    let stdout = stdout_handle.join().unwrap_or_default();
+    let stderr = stderr_handle.join().unwrap_or_default();
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
+    if !status.success() {
         return Err(format!(
             "pnpm install 失败 (exit {})\nstdout:\n{stdout}\nstderr:\n{stderr}",
-            output.status
+            status
         ));
     }
 
     Ok(())
 }
 
+fn spawn_pipe_reader<T: Read + Send + 'static>(
+    pipe: Option<T>,
+) -> std::thread::JoinHandle<String> {
+    std::thread::spawn(move || {
+        let mut buffer = String::new();
+        if let Some(mut pipe) = pipe {
+            let _ = pipe.read_to_string(&mut buffer);
+        }
+        buffer
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        harness_root_for_bundle, node_archive_spec_for, node_matches_manifest,
-        safe_archive_relative_path,
+        find_existing_harness, gc_harness_versions, harness_root_for_bundle,
+        harness_tree_bootable, node_archive_spec_for, node_matches_manifest,
+        safe_archive_relative_path, HARNESS_TREES_KEPT,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::time::Duration;
+
+    fn make_harness_tree(root: &Path, installed: bool) {
+        let cli = root.join("apps").join("cli").join("lib").join("bin.js");
+        fs::create_dir_all(cli.parent().unwrap()).unwrap();
+        fs::write(&cli, b"// cli").unwrap();
+        if installed {
+            fs::create_dir_all(root.join("node_modules").join(".pnpm")).unwrap();
+        }
+    }
+
+    #[test]
+    fn harness_tree_bootable_requires_installed_dependencies() {
+        let dir = std::env::temp_dir().join(format!("dsh-bootable-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let seeded = dir.join("seeded");
+        make_harness_tree(&seeded, false);
+        assert!(!harness_tree_bootable(&seeded));
+        let installed = dir.join("installed");
+        make_harness_tree(&installed, true);
+        assert!(harness_tree_bootable(&installed));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn recovery_skips_a_tree_without_installed_dependencies() {
+        let base = std::env::temp_dir().join(format!("dsh-recover-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let versions = base.join("harness-versions");
+        make_harness_tree(&versions.join("7c5e4321f834a90b"), false);
+        make_harness_tree(&versions.join("7a9222660fa6f5d1"), true);
+        let picked = find_existing_harness(&base).unwrap();
+        assert!(picked.ends_with("7a9222660fa6f5d1"));
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn recovery_prefers_the_newest_bootable_tree() {
+        let base = std::env::temp_dir().join(format!("dsh-recover-newest-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let versions = base.join("harness-versions");
+        make_harness_tree(&versions.join("older"), true);
+        std::thread::sleep(Duration::from_millis(50));
+        make_harness_tree(&versions.join("newer"), true);
+        let picked = find_existing_harness(&base).unwrap();
+        assert!(picked.ends_with("newer"));
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn gc_keeps_only_the_newest_harness_trees() {
+        let base = std::env::temp_dir().join(format!("dsh-gc-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let versions = base.join("harness-versions");
+        for name in ["a", "b", "c", "d", "e"] {
+            make_harness_tree(&versions.join(name), true);
+            std::thread::sleep(Duration::from_millis(30));
+        }
+        gc_harness_versions(&base);
+        let remaining: Vec<String> = fs::read_dir(&versions)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(remaining.len(), HARNESS_TREES_KEPT);
+        for name in &remaining {
+            assert!(["c", "d", "e"].contains(&name.as_str()), "kept {name}");
+        }
+        let _ = fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn isolates_harness_trees_by_bundle_hash() {

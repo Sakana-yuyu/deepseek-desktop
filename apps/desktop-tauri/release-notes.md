@@ -1,4 +1,4 @@
-# DeepSeek Harness Desktop 0.1.0-rc.7-0.1
+# DeepSeek Harness Desktop 0.1.0-rc.7-0.2
 
 ## English
 
@@ -8,10 +8,10 @@ The installer contains a trimmed Harness source tree without `node_modules`. On 
 
 ### What's new
 
-- Refreshes the bundled Harness source to upstream `dsh@0.1.0-rc.7`.
-- Preserves native desktop chrome, tray controls, signed automatic updates, completion notifications, and the Windows WSL Host option.
-
-Windows installation closes a running desktop process before replacing files and refreshes an existing desktop shortcut with the versioned DeepSeek fish icon.
+- Fixes the failed first-launch dependency install that made 0.1.0-rc.7-0.1 unable to start: the bundled workspace file now derives its patch and build declarations from the Harness source it ships.
+- When provisioning fails, the app now falls back to the newest harness tree with installed dependencies instead of a freshly seeded tree without them, so it keeps starting.
+- Dependency installs and runtime downloads now have deadlines instead of hanging on the splash forever, and provisioning keeps only the three newest harness trees.
+- Windows installation closes a running desktop process before replacing files and refreshes an existing desktop shortcut with the versioned DeepSeek fish icon.
 
 ### Included builds
 
@@ -29,10 +29,10 @@ DeepSeek Harness Desktop 是现有 `dsh web` 界面的 Tauri/WebView 外壳。
 
 ### 更新内容
 
-- 内置 Harness 源码更新至上游 `dsh@0.1.0-rc.7`。
-- 保留原生桌面界面、托盘控制、签名自动更新、任务完成提醒和 Windows WSL Host 选项。
-
-Windows 安装会先关闭正在运行的桌面进程再替换文件，并用带版本号的 DeepSeek 鱼形图标刷新已有桌面快捷方式。
+- 修复 0.1.0-rc.7-0.1 首次启动依赖安装失败导致无法启动的问题：安装包内 workspace 文件的补丁与构建声明现在直接派生自其实际携带的 Harness 源码。
+- 预配失败时，应用会回退到依赖已安装完成的最新一棵 harness 树，而不是刚播种、没有依赖的树，保证仍能启动。
+- 依赖安装与运行时下载现在有期限，不再可能让启动页永久挂起；预配只保留最新的三棵 harness 树。
+- Windows 安装会先关闭正在运行的桌面进程再替换文件，并用带版本号的 DeepSeek 鱼形图标刷新已有桌面快捷方式。
 
 ### 包含的构建
 

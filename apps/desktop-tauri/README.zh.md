@@ -4,7 +4,7 @@
 
 这是现有 `dsh web` 界面的 Rust/WebView2 外壳。安装包携带 **Harness 源码**，不包含 `node_modules`；首次运行先扫描本机兼容的 Node / pnpm 和已有的 `~/.dsh` 主目录，只在扫描失败时从镜像拉取构建工具，再对安装包内的源码树执行 `pnpm install --prod`。
 
-当前桌面发行版本：**0.1.0-rc.7-0.1**。
+当前桌面发行版本：**0.1.0-rc.7-0.2**。
 
 ## 架构
 
@@ -46,7 +46,7 @@ Windows 桌面只交付一个安装包、一个桌面二进制和同一个 Web �
 - `bin/` — 写入 Host PATH 的可 spawn `dsh.exe` / `dsh.cmd` / `pnpm.cmd`；用户 Path 缺失时也会加入
 - `cache/` — 下载的 Node zip 或 tarball
 
-首次启动会先扫描进程 `PATH`（Windows 上再加上用户/系统里的持久 Path）和常见安装位置，查找满足 `^22.19 || >=24` 的 Node 和可用的 pnpm，再决定是否从镜像下载。若 `$DSH_HOME`（进程环境，或 Windows 上的用户/系统环境）或 `~/.dsh` 已包含会话、凭据、`.env`、profile 或 settings，则采用该主目录，并把隔离 `dsh-home/` 中缺失的文件复制进去。随后写入可被 spawn 的 `dsh` / `pnpm` shim（`dsh.exe` 是以 CLI 跳板运行的桌面二进制），并把已选定的 Node / pnpm 目录（以及发现 PATH 上缺少 `git` 或 `bash` 时的 Git `cmd`/`bin`）前置到 Host PATH，使应用内的 `spawn('dsh')`、`dsh plugin`、MCP 的 `npx` 以及 agent 的 `bash`/`git` 查找能够解析。Windows 不写入无扩展名的 `dsh` 文件。父进程没有可见控制台时，Windows 上的 Host 与 CLI 子进程不会再弹出控制台窗口。用户 Path 通过注册表加入 shim 目录；仅当对应命令仍不是可 spawn 文件时，才加入 Node 或 pnpm 目录。扫描失败时，预配器仍会为 Windows x64/x86、macOS x64/arm64 和 Linux x64/arm64 下载 Node。zip 与 tar.gz 解压会拒绝预期 Node 根目录以外的条目。Unix 压缩包保留可执行权限。私有安装的 pnpm 由已选定的 Node 二进制执行；扫描到主机 pnpm 时则直接调用。按源码包隔离的 Harness 目录允许更新版本预配新源码，而不删除旧 Host 正在使用的文件；兼容的 Node 和 pnpm 会在源码更新之间复用。原生外壳只允许一个应用实例，重复启动时聚焦已有窗口。Release 构建会在主窗口打开后再检查更新；更新网络或 manifest 失败只写入日志，不拖住启动页。运行时 manifest 已就绪时跳过主机工具链扫描，并用文件大小比对 Node，不再对 `node.exe` 做 SHA256。窗口标题栏、托盘、更新、系统通知和完成音都留在这个 Rust crate。与 Host 的协作是复制到 `$DSH_HOME/desktop-overlay` 的 overlay 插件，通过 `dsh web --patch` 加载，不修改 `packages/`。
+首次启动会先扫描进程 `PATH`（Windows 上再加上用户/系统里的持久 Path）和常见安装位置，查找满足 `^22.19 || >=24` 的 Node 和可用的 pnpm，再决定是否从镜像下载。若 `$DSH_HOME`（进程环境，或 Windows 上的用户/系统环境）或 `~/.dsh` 已包含会话、凭据、`.env`、profile 或 settings，则采用该主目录，并把隔离 `dsh-home/` 中缺失的文件复制进去。随后写入可被 spawn 的 `dsh` / `pnpm` shim（`dsh.exe` 是以 CLI 跳板运行的桌面二进制），并把已选定的 Node / pnpm 目录（以及发现 PATH 上缺少 `git` 或 `bash` 时的 Git `cmd`/`bin`）前置到 Host PATH，使应用内的 `spawn('dsh')`、`dsh plugin`、MCP 的 `npx` 以及 agent 的 `bash`/`git` 查找能够解析。Windows 不写入无扩展名的 `dsh` 文件。父进程没有可见控制台时，Windows 上的 Host 与 CLI 子进程不会再弹出控制台窗口。用户 Path 通过注册表加入 shim 目录；仅当对应命令仍不是可 spawn 文件时，才加入 Node 或 pnpm 目录。扫描失败时，预配器仍会为 Windows x64/x86、macOS x64/arm64 和 Linux x64/arm64 下载 Node。zip 与 tar.gz 解压会拒绝预期 Node 根目录以外的条目。Unix 压缩包保留可执行权限。私有安装的 pnpm 由已选定的 Node 二进制执行；扫描到主机 pnpm 时则直接调用。按源码包隔离的 Harness 目录允许更新版本预配新源码，而不删除旧 Host 正在使用的文件；兼容的 Node 和 pnpm 会在源码更新之间复用。安装包内的 workspace 文件派生自仓库的 `pnpm-workspace.yaml`，仅裁剪包成员。预配失败时，应用回退到依赖已安装完成的最新一棵 harness 树；安装与下载步骤均有期限，预配只保留最新的三棵 harness 树。原生外壳只允许一个应用实例，重复启动时聚焦已有窗口。Release 构建会在主窗口打开后再检查更新；更新网络或 manifest 失败只写入日志，不拖住启动页。运行时 manifest 已就绪时跳过主机工具链扫描，并用文件大小比对 Node，不再对 `node.exe` 做 SHA256。窗口标题栏、托盘、更新、系统通知和完成音都留在这个 Rust crate。与 Host 的协作是复制到 `$DSH_HOME/desktop-overlay` 的 overlay 插件，通过 `dsh web --patch` 加载，不修改 `packages/`。
 
 ## 构建
 
@@ -61,7 +61,7 @@ $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD=(Get-Content "$HOME\.tauri\deepseek-desk
 pnpm run build:win
 ```
 
-安装包输出：`src-tauri/target/release/bundle/nsis/DeepSeek Harness_0.1.0-rc.7-0.1_x64-setup.exe`
+安装包输出：`src-tauri/target/release/bundle/nsis/DeepSeek Harness_0.1.0-rc.7-0.2_x64-setup.exe`
 
 NSIS 安装包包含**英语**、**简体中文**和**繁体中文**。安装语言自动跟随操作系统 locale，不显示语言选择器；不支持的 locale 使用英语。原生启动页、托盘、关闭对话框和启动状态文案遵循同一规则（`zh*` 用中文，其余用英语）。嵌入的 `dsh web` 客户端仍使用自己的 Settings 语言。复制文件前，安装器会静默关闭 `dsh-desktop.exe` 及其子进程树。安装后，安装器使用独立的版本化 ICO 资源重建已有桌面快捷方式，并通知 Explorer 清除陈旧的图标缓存记录。
 

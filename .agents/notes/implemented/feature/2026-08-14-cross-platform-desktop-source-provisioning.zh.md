@@ -12,7 +12,7 @@ Status: implemented
 
 **桌面安装包携带裁剪后的源码树和已构建应用产物，但不携带 `node_modules`。** 首次启动把该只读资源复制到应用数据目录，先扫描本机是否已有满足 `^22.19 || >=24` 的 Node 和可用的 pnpm，只在扫描失败时下载对应平台的 Node 压缩包，只在需要时通过已选定的 Node 安装 pnpm，再在移除 `CI` 的环境中执行 `pnpm install --prod --no-frozen-lockfile`。镜像端点仍可通过 `DSH_NODE_MIRROR` 和 `DSH_NPM_REGISTRY` 配置。主机匹配与 Harness 主目录采用由[桌面端主机工具链扫描与主目录匹配](2026-08-14-desktop-host-env-and-home-adoption.md)负责。
 
-**每个源码包使用隔离的可写目录。** 内容哈希选择 `harness-versions/<bundle-hash>`，因此更新不会删除旧 Host 正在占用的文件。兼容的 Node 和 pnpm 运行时保持共享，并在源码更新之间复用。原生外壳只允许一个应用实例，再次启动时会聚焦已有窗口。
+**每个源码包使用隔离的可写目录。** 内容哈希选择 `harness-versions/<bundle-hash>`，因此更新不会删除旧 Host 正在占用的文件。兼容的 Node 和 pnpm 运行时保持共享，并在源码更新之间复用。原生外壳只允许一个应用实例，再次启动时会聚焦已有窗口。回退只接受可启动的树，预配步骤带有期限，被取代的树会被清理（[桌面 rc.7 预配失败与不可启动的回退](../bug-fix/2026-08-19-desktop-rc7-provision-fallback.md)）。
 
 **已选定的 Node 负责执行所有预配命令。** Windows x64 和 x86 使用官方 zip 布局；macOS x64/arm64 与 Linux x64/arm64 使用 tar.gz 布局。压缩包条目必须位于预期的带版本 Node 目录之下。tar 解压保留 Unix 权限位，npm 按平台对应的 Node 分发布局解析，私有安装的 pnpm 由已选定的 Node 二进制直接执行其 JavaScript 入口。扫描到主机 pnpm 时则直接调用它。
 
