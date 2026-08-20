@@ -69,7 +69,7 @@ English | [中文](README.zh.md)
 ### 1. 下载并安装
 
 1. 打开 [GitHub Releases](https://github.com/Sakana-yuyu/deepseek-harness-desktop/releases)。
-2. 下载当前 **0.1.0-rc.7-0.2** 对应平台的安装包。
+2. 下载当前 **0.1.0-rc.8-0.1** 对应平台的安装包。
 3. Windows 如果出现 SmartScreen 提示，确认来源后选择“更多信息”并继续运行。
 4. 首次启动先扫描本机 Node / pnpm 和已有 `~/.dsh` 对话与密钥，只在缺失时下载运行时和生产依赖，后续启动复用已匹配的环境。
 

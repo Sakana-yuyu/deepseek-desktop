@@ -28,7 +28,7 @@ const trimmedPackages = [
   'apps/web',
 ]
 
-const skipPackageGroups = new Set(['examples', 'test-support'])
+const skipPackageGroups = new Set(['examples', 'test-support', 'experimental'])
 
 const skipFileSuffixes = ['.spec.ts', '.e2e.ts', '.snapshot.ts']
 

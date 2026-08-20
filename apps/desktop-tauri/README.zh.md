@@ -4,7 +4,7 @@
 
 这是现有 `dsh web` 界面的 Rust/WebView2 外壳。安装包携带 **Harness 源码**，不包含 `node_modules`；首次运行先扫描本机兼容的 Node / pnpm 和已有的 `~/.dsh` 主目录，只在扫描失败时从镜像拉取构建工具，再对安装包内的源码树执行 `pnpm install --prod`。
 
-当前桌面发行版本：**0.1.0-rc.7-0.2**。
+当前桌面发行版本：**0.1.0-rc.8-0.1**。
 
 ## 架构
 
@@ -61,7 +61,7 @@ $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD=(Get-Content "$HOME\.tauri\deepseek-desk
 pnpm run build:win
 ```
 
-安装包输出：`src-tauri/target/release/bundle/nsis/DeepSeek Harness_0.1.0-rc.7-0.2_x64-setup.exe`
+安装包输出：`src-tauri/target/release/bundle/nsis/DeepSeek Harness_0.1.0-rc.8-0.1_x64-setup.exe`
 
 NSIS 安装包包含**英语**、**简体中文**和**繁体中文**。安装语言自动跟随操作系统 locale，不显示语言选择器；不支持的 locale 使用英语。原生启动页、托盘、关闭对话框和启动状态文案遵循同一规则（`zh*` 用中文，其余用英语）。嵌入的 `dsh web` 客户端仍使用自己的 Settings 语言。复制文件前，安装器会静默关闭 `dsh-desktop.exe` 及其子进程树。安装后，安装器使用独立的版本化 ICO 资源重建已有桌面快捷方式，并通知 Explorer 清除陈旧的图标缓存记录。
 

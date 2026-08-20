@@ -1,6 +1,6 @@
 [package]
 name = "dsh-desktop"
-version = "0.1.0-rc.7-0.2"
+version = "0.1.0-rc.8-0.1"
 description = "DeepSeek Harness desktop shell (Tauri)"
 authors = ["DeepSeek"]
 edition = "2021"
