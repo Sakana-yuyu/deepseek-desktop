@@ -10,7 +10,7 @@ DeepSeek vision deployments use the chat-completions image protocol, but the dir
 
 ## Decision
 
-The direct adapter lets a configured model opt in with `inputModalities: [text, image]`; validation rejects empty, unknown, or duplicate modalities. Flash, Pro, unlisted ids, and configured models that omit `inputModalities` remain explicitly text-only. The shipped catalog does not advertise `deepseek-v4-flash-vision-exp` until its model endpoint is ready, so the model selector cannot offer an unavailable route; deployment and snapshot catalogs can enable their exact vision model independently.
+The shipped catalog declares `deepseek-v4-flash-vision-exp` with `inputModalities: [text, image]`; configured catalogs use the same declaration to opt another exact model into image input, and validation rejects empty, unknown, or duplicate modalities. Flash, Pro, unlisted ids, and configured models that omit `inputModalities` remain explicitly text-only.
 
 The adapter resolves `ctx.attachments` per image request, reads each retained durable reference with the request signal, and serializes verified bytes as ordered OpenAI-compatible `image_url` data URLs. Text-only user messages retain string content. Tool results retain string-only `tool` messages; image-only results use `(see attached image)`, and consecutive retained tool-result images follow in one `user` message beginning `Attached image(s) from tool result:`. System and assistant history images fail with `UNSUPPORTED_CONTENT` before attachment or network I/O.
 
@@ -27,8 +27,8 @@ Canonical messages continue to store only `ImageAttachmentRef`. Data URLs exist 
 
 ## Verification
 
-Package tests pin model discovery and fallback capabilities, configuration validation and live settings updates, user and tool-result wire messages, all admitted MIME types, cancellation, attachment failures, 413 classification, exact image-bound behavior, and pi-ai equivalence. A keyless assembled ACP request records the native adapter's tool-result data URL and oldest-image placeholder.
+Package tests pin model discovery and fallback capabilities, configuration validation and live settings updates, user and tool-result wire messages, all admitted MIME types, cancellation, attachment failures, 413 classification, exact image-bound behavior, and pi-ai equivalence. A keyless assembled ACP request records the native adapter's tool-result data URL and oldest-image placeholder. A real-API smoke test with an explicit image-capable catalog entry sends a deterministic image only when `DEEPSEEK_VISION_E2E=1` is set in addition to the provider key.
 
 ## Consequences
 
-Configured DeepSeek vision routes can consume durable user and tool-result images without changing session durability or response streaming. Repeated history still expands request bodies, but deterministic oldest-first offload bounds the dominant payload and leaves headroom below the official 30 MiB request-body limit. Image token pricing remains provider-owned because the official image token formula is not available.
+The official DeepSeek vision route and configured vision routes can consume durable user and tool-result images without changing session durability or response streaming. Repeated history still expands request bodies, but deterministic oldest-first offload bounds the dominant payload and leaves headroom below the official 30 MiB request-body limit. Image token pricing remains provider-owned because the official image token formula is not available.

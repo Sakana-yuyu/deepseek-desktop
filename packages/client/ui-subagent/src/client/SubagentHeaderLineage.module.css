@@ -1,11 +1,20 @@
 .root {
   position: relative;
-}
-
-.trigger {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 10px;
+  min-width: 0;
+}
+
+.switcherRoot {
+  min-width: 0;
+  margin-left: 6px;
+}
+
+.trigger,
+.switcherTrigger {
+  display: inline-flex;
+  align-items: center;
   min-height: 28px;
   padding: 3px 2px;
   border: 0;
@@ -17,8 +26,39 @@
   cursor: pointer;
 }
 
-.count {
-  margin: 0 5px;
+.trigger {
+  gap: 4px;
+}
+
+.switcherTrigger {
+  gap: 4px;
+  min-width: 0;
+  max-width: 244px;
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
+}
+
+.ancestorSwitcherTrigger {
+  color: var(--dsw-alias-label-tertiary);
+  font-weight: 400;
+}
+
+.switcherTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.switcherTrigger svg {
+  flex: none;
+}
+
+.separator {
+  color: var(--dsw-alias-label-caption);
+  font-size: 14px;
+  line-height: 20px;
 }
 
 .activitySlot {
@@ -33,7 +73,18 @@
   color: var(--dsw-alias-label-secondary);
 }
 
-.trigger svg {
+.switcherTrigger:hover,
+.switcherTrigger:focus-visible {
+  color: var(--dsw-alias-label-primary);
+}
+
+.ancestorSwitcherTrigger:hover,
+.ancestorSwitcherTrigger:focus-visible {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.trigger svg,
+.switcherTrigger svg {
   transition: transform 120ms ease;
 }
 
@@ -42,9 +93,7 @@
 }
 
 .menu {
-  position: absolute;
-  top: calc(100% + 5px);
-  left: 0;
+  position: fixed;
   z-index: 100;
   box-sizing: border-box;
   display: flex;
@@ -169,6 +218,10 @@
 .label {
   color: inherit;
   font-weight: 400;
+}
+
+.currentLabel {
+  font-weight: 600;
 }
 
 .summary,

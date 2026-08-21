@@ -2,9 +2,9 @@
 
 [English](README.md) | 中文
 
-面向两种不同生命周期的浏览器权限界面。「通用」设置行读取显式暴露的 `permission` Settings 描述符，从 host 的动态 `defaultPreset` enum 中推导选项，并携带描述符的 revision 写入一条 `settings.mutate` 路径操作。它的 observable 经 slot 系统的 `hooks` 格传递，因此 React 钩子由渲染器绑定；推送的失效通知会重新获取描述符。这个值仅在后续会话创建时生效；改变它不会切换当前会话。选择 Full access 时必须先显式确认风险，该行随后才会写入。
+面向两种不同生命周期的浏览器权限界面。「通用」设置行读取显式暴露的 `permission` Settings 描述符，从 host 的动态 `defaultPreset` enum 中推导选项，并携带描述符的 revision 写入一条 `settings.mutate` 路径操作。它的 observable 经 slot 系统的 `hooks` 格传递，因此 React 钩子由渲染器绑定；推送的失效通知会重新获取描述符。这个值作用于新建会话；Web 之后把某个既有 Workspace 空白会话确认为新会话复用目标时，host 会接纳这个确切的 live 或冷会话，并刷新仍来自默认值的权限。选择完全权限预设时必须先显式确认风险，该行随后才会写入。
 
-当前会话界面仍是挂在 host `/permission` 命令上的 popupSelect **装饰**（`ctx.commandUi.decorate`）。装饰不是第二条命令——host 命令保留斜杠菜单行、带参路径（`/permission <preset>` 直接切换）与持久生命周期记账；装饰只把裸调用替换为选择框：一张扁平预设列表，当前值标记为 active，kebab-case 预设名渲染为 Title Case 标签（`workspace-write` → `Workspace Write`，与 composer chip 的显示变换孪生），选中即提交 `/permission <preset>` 命令行。选项与 active 标记读取会话的 `permissions` 投影（与 composer chip 渲染的同一份 host 计算 select），因此两个当前会话界面共享同一读源与同一写路径，推送的投影帧是两者共同跟随的唯一确认。装饰恰在投影 key 存在时可用；无权限组合既不显示选择框，也不显示 Settings 行。
+当前会话界面仍是挂在 host `/permission` 命令上的 popupSelect **装饰**（`ctx.commandUi.decorate`）。装饰不是第二条命令——host 命令保留斜杠菜单行、带参路径（`/permission <preset>` 直接切换）与持久生命周期记账；装饰只把裸调用替换为选择框：一张扁平预设列表，当前值标记为 active，内置预设的规范名称渲染为本地化产品标签，显式 host 标签保持原样，未知 kebab-case 预设名仍渲染为 Title Case 标签。选中即提交 `/permission <preset>` 命令行。选项与 active 标记读取会话的 `permissions` 投影（与 composer chip 渲染的同一份 host 计算 select），因此两个当前会话界面共享同一读源与同一写路径，推送的投影帧是两者共同跟随的唯一确认。装饰恰在投影 key 存在时可用；无权限组合既不显示选择框，也不显示 Settings 行。
 
 `/client` 导出面为插件本体（`apply`／`inject`）。
 
@@ -19,3 +19,4 @@
 ## 已知限制与暂缓事项
 
 - **Settings 行仅在 Web 中可用**：非 Web 客户端仍可通过 `/permission` 切换当前会话，但不会获得这项浏览器贡献。
+- **预设描述来自 host**：本地化的内置标签旁边可能显示另一种语言编写的描述。

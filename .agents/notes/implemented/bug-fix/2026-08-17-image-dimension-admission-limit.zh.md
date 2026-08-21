@@ -20,8 +20,8 @@ Status: implemented
 
 ## Related
 
-- [最小 read_image 工具](../feature/2026-08-10-minimal-read-image-tool.md)，本次修复补上的正是该工具的准入缺口。
-- [Web 图片摄入与限制对齐](../feature/2026-08-12-web-image-intake-and-limits-alignment.md)，同一组 `ImageAttachmentLimits` 在输入框侧的呈现。
+- [最小 read_image 工具](../feature/2026-08-10-minimal-read-image-tool.zh.md)，本次修复补上的正是该工具的准入缺口。
+- [Web 图片摄入与限制对齐](../feature/2026-08-12-web-image-intake-and-limits-alignment.zh.md)，同一组 `ImageAttachmentLimits` 在输入框侧的呈现。
 
 ## Consequences
 

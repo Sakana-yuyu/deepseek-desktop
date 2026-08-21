@@ -6,7 +6,7 @@
 
 ## 问题
 
-issue #2248 的第二步对齐，接在[附件展示 note](2026-08-11-web-attachment-display-alignment.md) 之后（其附件栏、toast 与原子组件包的决策继续有效；本 note 取代其中历史画廊几何与灯箱 backdrop 的具体规格）。与 DeepSeek Chat 相比剩下的差距：图片只能拖到 composer 卡片上——拖到聊天记录区会让浏览器直接导航到文件；灯箱关闭钮是裸 `×` 文本字符（button 不继承字体，且该字形的墨迹在行框中心之上，因此明显偏斜），backdrop 用 `color-mix(label-primary 74%)`，dark 下反转成刺眼的白色蒙层；一条消息的多张图各自以最大 240px 的块竖着堆叠，因为画廊容器本身被钉在 240px；客户端完全不执行也不展示图片限额——用户可以攒 50 张图，直到提交后收到原始的 `attachment-error (TOO_MANY_IMAGES)` toast，眼看附件栏清空又回滚。
+issue #2248 的第二步对齐，接在[附件展示 note](2026-08-11-web-attachment-display-alignment.zh.md) 之后（其附件栏、toast 与原子组件包的决策继续有效；本 note 取代其中历史画廊几何与灯箱 backdrop 的具体规格）。与 DeepSeek Chat 相比剩下的差距：图片只能拖到 composer 卡片上——拖到聊天记录区会让浏览器直接导航到文件；灯箱关闭钮是裸 `×` 文本字符（button 不继承字体，且该字形的墨迹在行框中心之上，因此明显偏斜），backdrop 用 `color-mix(label-primary 74%)`，dark 下反转成刺眼的白色蒙层；一条消息的多张图各自以最大 240px 的块竖着堆叠，因为画廊容器本身被钉在 240px；客户端完全不执行也不展示图片限额——用户可以攒 50 张图，直到提交后收到原始的 `attachment-error (TOO_MANY_IMAGES)` toast，眼看附件栏清空又回滚。
 
 ## 决策
 

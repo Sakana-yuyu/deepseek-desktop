@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import SessionStore from '@deepseek-ai/dsh-session'
+import SessionStore, { Session } from '@deepseek-ai/dsh-session'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import { TypertLookupFailure } from '@deepseek-ai/dsh-typert-protocol'
 import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
@@ -211,6 +211,62 @@ describe('sessions.list cold merge', () => {
         updatedAt: 300,
       }),
     ])
+  })
+})
+
+describe('session.create cold blank reuse', () => {
+  it('resumes the persisted target before notifying the permission-default owner', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(UserQuestionService)
+    const sessionId = sid('cold-workspace-blank')
+    const meta = header(sessionId, 1000)
+    const events = [
+      { type: 'permission/preset', seq: 0, time: 1, data: { preset: 'workspace-write', origin: 'default' } },
+      { type: 'sandbox/mode', seq: 1, time: 2, data: { mode: 'workspace-write' } },
+      { type: 'approval/policy', seq: 2, time: 3, data: { policy: 'ask' } },
+    ] as SessionEvent[]
+    ctx.provide('sessionPersistence', {
+      list: () => Promise.resolve([meta]),
+      inspect: () => Promise.resolve({ meta, events }),
+      locate: () => undefined,
+    } as never)
+    const resumedSession = Session.create(sessionId, events, meta)
+    const resumedAgent = { id: sessionId, session: resumedSession, status: 'idle', ctx } as Agent
+    const resume = vi.spyOn(ctx.agents, 'resume').mockResolvedValue({
+      agent: resumedAgent,
+      dispose: () => Promise.resolve(),
+    })
+    const attachSession = vi.fn(() => Promise.resolve())
+    const workspace = {
+      id: 'workspace-1',
+      path: '/proj',
+      sessionIds: [sessionId],
+      attachSession,
+    }
+    ctx.provide('workspaceRegistry', {
+      get: () => workspace,
+      list: () => [workspace],
+      archivedSessionIds: [],
+    } as never)
+    const refreshDefaultForReuse = vi.fn()
+    ctx.provide('permissionPresets', { refreshDefaultForReuse } as never)
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => ({ provider: 'p', model: 'm' }),
+      cwd: '/tmp',
+    })
+
+    const response = await api.sessions.create(request({
+      workspaceId: 'workspace-1' as never,
+      sessionId,
+      reuseWorkspaceBlank: true as const,
+    }))
+
+    expect(response.result.ok).toBe(true)
+    expect(resume).toHaveBeenCalledOnce()
+    expect(attachSession).toHaveBeenCalledWith(sessionId)
+    expect(refreshDefaultForReuse).toHaveBeenCalledWith(resumedSession)
   })
 })
 

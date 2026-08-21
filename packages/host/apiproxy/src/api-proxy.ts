@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname } from 'node:path'
+import { z as zod } from 'zod'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type { Agent, ModelSelection, ModelSelectionRef, AgentOptions, AgentStatus } from '@deepseek-ai/dsh-agent'
@@ -19,6 +20,9 @@ import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
 import { isAppendSurfaceEvent, isJsonValue } from '@deepseek-ai/dsh-session'
 import type { JsonValue, Session, SessionEvent, SessionEventMap, SessionHeader, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
+// Type-only: resolves the optional permission-default owner notified after
+// the Web proposes and the Host verifies a Workspace blank reuse target.
+import type {} from '@deepseek-ai/dsh-permission-presets'
 import { SessionQueryError, type SessionSearchCursor } from '@deepseek-ai/dsh-session-query'
 import { SubagentError } from '@deepseek-ai/dsh-subagent'
 import type { SubagentListEntry as CatalogSubagentListEntry } from '@deepseek-ai/dsh-subagent'
@@ -447,7 +451,9 @@ function jobViews(snapshots: readonly JobSnapshot[]): JobView[] {
  * turn is one model-loop execution). Standalone plugin events — command
  * lifecycle records, plan/mode, titles, goals — never open a turn, so
  * running `/plan` or `/goal` on a fresh session keeps it blank
- * (list-hidden, reusable).
+ * (list-hidden, reusable). `session.create` combines this predicate with the
+ * Workspace membership and archive state before a confirmed reuse can notify
+ * permission-default owners; they do not maintain a second blankness rule.
  */
 function sessionBlank(session: Session): boolean {
   return !session.events.some(event => event.type === 'turn/start')
@@ -1236,10 +1242,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   ctx.inject(['sessionProjections'], (projectionCtx) => {
     projectionCtx.sessionProjections.register<'sessionListMetadata', SessionListMetadata>({
       key: 'sessionListMetadata',
-      schema: sessionListMetadataProjectionSchema,
+      stateSchema: sessionListMetadataProjectionSchema,
       init: () => ({ blank: true, lastPromptAt: null }),
       apply: applySessionListMetadata,
-      view: state => state,
+      wire: { viewSchema: sessionListMetadataProjectionSchema, view: state => state },
       stateVersion: 1,
     })
   })
@@ -1260,10 +1266,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   ctx.inject(['sessionProjections', 'attachments'], (projectionCtx) => {
     projectionCtx.sessionProjections.register<'imageLimits', null>({
       key: 'imageLimits',
-      schema: imageLimitsProjectionSchema,
+      stateSchema: zod.null(),
       init: () => null,
       apply: state => state,
-      view: () => projectionCtx.attachments.imageLimits,
+      wire: { viewSchema: imageLimitsProjectionSchema, view: () => projectionCtx.attachments.imageLimits },
       stateVersion: 1,
     })
   })
@@ -2095,8 +2101,13 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
         const cwd = workspace?.path ?? request.payload.cwd ?? defaults.cwd
         const requestedPreset = request.payload.agentPreset
+        const refreshDefaultAfterReuse = request.payload.reuseWorkspaceBlank === true
+          && workspace !== undefined
+          && workspace.sessionIds.includes(sessionId)
+          && !ctx.workspaceRegistry.archivedSessionIds.includes(sessionId)
+        let adopted: Agent
         try {
-          await ensureSession(sessionId, cwd, request.payload.sessionId !== undefined, requestedPreset)
+          adopted = await ensureSession(sessionId, cwd, request.payload.sessionId !== undefined, requestedPreset)
         } catch (error: unknown) {
           if (error instanceof AgentPresetConflict) {
             return err(request, {
@@ -2142,6 +2153,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             })
           }
         }
+        if (refreshDefaultAfterReuse && sessionBlank(adopted.session)) {
+          ctx.get('permissionPresets')?.refreshDefaultForReuse(adopted.session)
+        }
         // Echo the composition the session RUNS so a client can label it
         // without waiting for the next list refresh — the create is the commit
         // point that knows it (a caller that named none gets the default).
@@ -2150,8 +2164,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         // switched while blank runs a preset its header no longer names, so
         // echoing the header would contradict both the adoption this call just
         // allowed and the row `session.list` serves for the same session.
-        const created = ctx.agents.get(sessionId)
-        const createdPreset = created === undefined ? undefined : resolveSessionPreset(created.session)
+        const createdPreset = resolveSessionPreset(adopted.session)
         return ok(request, { sessionId, ...createdPreset === undefined ? {} : { agentPreset: createdPreset } })
       },
 

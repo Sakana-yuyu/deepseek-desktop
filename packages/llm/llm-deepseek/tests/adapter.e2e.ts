@@ -1,10 +1,18 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime, { createUserMessage, CallId, ReasoningEffortId , createMessage } from '@deepseek-ai/dsh-llm'
 import type { Message, ToolSchema } from '@deepseek-ai/dsh-llm'
+import AttachmentStore, { AttachmentId } from '@deepseek-ai/dsh-attachment'
+import type {
+  ImageAttachmentLimits,
+  ImageAttachmentRef,
+  SaveImageAttachment,
+  StoredImageAttachment,
+} from '@deepseek-ai/dsh-attachment'
 import { LocalCredentialProvider } from '@deepseek-ai/dsh-credentials-local'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import type { Config } from '@deepseek-ai/dsh-llm-deepseek'
@@ -12,12 +20,49 @@ import { assemble, type AssembledResult } from './assemble.ts'
 
 /**
  * Real-API e2e for the direct-fetch adapter: V4 Flash + V4 Pro across
- * thinking modes and all official effort levels. Key-gated — skips
- * entirely without $DEEPSEEK_API_KEY (see vitest.e2e.config.ts).
+ * thinking modes and all official effort levels. The suite skips entirely
+ * without $DEEPSEEK_API_KEY; the pre-release vision smoke additionally
+ * requires $DEEPSEEK_VISION_E2E=1 (see vitest.e2e.config.ts).
  */
 
 const FLASH = 'deepseek-v4-flash'
 const PRO = 'deepseek-v4-pro'
+const VISION = 'deepseek-v4-flash-vision-exp'
+const VISION_E2E_ENABLED = process.env.DEEPSEEK_VISION_E2E === '1'
+const RED_IMAGE = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
+  'base64',
+)
+const RED_IMAGE_REF: ImageAttachmentRef = {
+  attachmentId: AttachmentId(`sha256:${createHash('sha256').update(RED_IMAGE).digest('hex')}`),
+  mediaType: 'image/png',
+  bytes: RED_IMAGE.byteLength,
+  width: 1,
+  height: 1,
+}
+
+class E2eAttachmentStore extends AttachmentStore {
+  readonly imageLimits: ImageAttachmentLimits = {
+    maxImageBytes: 1024,
+    maxImagesPerMessage: 1,
+    maxMessageImageBytes: 1024,
+    maxImagePixels: 1,
+    maxImageDimension: 1,
+    mediaTypes: ['image/png'],
+  }
+
+  validateImage(_input: SaveImageAttachment): Promise<void> {
+    return Promise.resolve()
+  }
+
+  saveImage(_input: SaveImageAttachment): Promise<ImageAttachmentRef> {
+    return Promise.resolve(RED_IMAGE_REF)
+  }
+
+  readImage(_ref: ImageAttachmentRef, _signal?: AbortSignal): Promise<StoredImageAttachment> {
+    return Promise.resolve({ ref: RED_IMAGE_REF, data: RED_IMAGE })
+  }
+}
 const contexts: Context[] = []
 let identityHome: string
 
@@ -30,6 +75,7 @@ async function harness(_model: string, config: Partial<Config> = {}) {
   const ctx = new Context()
   contexts.push(ctx)
   await ctx.plugin(LlmRuntime)
+  await ctx.plugin(E2eAttachmentStore)
   await ctx.plugin(LlmDeepSeek, config)
   return ctx
 }
@@ -65,6 +111,25 @@ const weatherTool: ToolSchema = {
 }
 
 describe.skipIf(!process.env.DEEPSEEK_API_KEY)('llm-deepseek e2e (real API)', () => {
+  it.skipIf(!VISION_E2E_ENABLED)('recognizes a deterministic image with the official vision model', async () => {
+    const ctx = await harness(VISION, {
+      thinking: 'disabled',
+    })
+    const result = await assemble(ctx, {
+      model: VISION,
+      messages: [createUserMessage({
+        content: [
+          { type: 'text', text: 'This image is one solid color. Reply with only its English color name.' },
+          { type: 'image', attachment: RED_IMAGE_REF },
+        ],
+        source: { kind: 'plugin', plugin: 'test' },
+      })],
+      maxTokens: 50,
+    })
+    expect(result.finish.kind).toBe('stop')
+    expect(textOf(result).toLowerCase()).toContain('red')
+  })
+
   it('serves a real request with the key held only by a credentials-local document', async () => {
     const key = process.env.DEEPSEEK_API_KEY
     if (key === undefined) throw new Error('e2e ran without DEEPSEEK_API_KEY')
@@ -72,7 +137,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY)('llm-deepseek e2e (real API)', ()
     try {
       // JSON.stringify quotes the value: YAML is a JSON superset, so a real
       // key survives whatever characters it happens to carry.
-      await writeFile(join(dir, '.credentials.yaml'), `DEEPSEEK_API_KEY: ${JSON.stringify(key)}\n`, { mode: 0o600 })
+      await writeFile(join(dir, '.credentials.yaml'), `version: 1\nrefs:\n  DEEPSEEK_API_KEY: ${JSON.stringify(key)}\n`, { mode: 0o600 })
       // Scrub the ambient variable so only the credential seam can supply the
       // key: this request proves the per-request resolution path end to end.
       vi.stubEnv('DEEPSEEK_API_KEY', '')
