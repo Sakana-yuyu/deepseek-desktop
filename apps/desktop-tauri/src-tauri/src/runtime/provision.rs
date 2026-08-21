@@ -1245,13 +1245,16 @@ mod tests {
         .unwrap();
 
         let manifest_path = dir.join("manifest.json");
+        // serde_json::json! keeps Windows path backslashes properly escaped;
+        // a format!-built JSON string would be rejected by the parser.
         fs::write(
             &manifest_path,
-            format!(
-                r#"{{"bundleSha256":"0123456789abcdef0123456789abcdef","nodePath":"{}","nodeBytes":{}}}"#,
-                node.display(),
-                bytes
-            ),
+            serde_json::json!({
+                "bundleSha256": "0123456789abcdef0123456789abcdef",
+                "nodePath": node.display().to_string(),
+                "nodeBytes": bytes,
+            })
+            .to_string(),
         )
         .unwrap();
 
@@ -1287,10 +1290,12 @@ mod tests {
         let manifest_path = dir.join("manifest.json");
         fs::write(
             &manifest_path,
-            format!(
-                r#"{{"bundleSha256":"0123456789abcdef0123456789abcdef","nodePath":"{}","nodeBytes":1234}}}"#,
-                dir.join("missing-node.exe").display()
-            ),
+            serde_json::json!({
+                "bundleSha256": "0123456789abcdef0123456789abcdef",
+                "nodePath": dir.join("missing-node.exe").display().to_string(),
+                "nodeBytes": 1234,
+            })
+            .to_string(),
         )
         .unwrap();
 
