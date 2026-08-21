@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-14-desktop-path-bridge.md
 2026-08-14-desktop-path-bridge.md: 00c9f14c4fbab867da262b1519680f2b0ee93713
-2026-08-14-desktop-path-bridge.zh.md: 4ece264e1db159e83ca89ed8c6f1637a906fe1b8
+2026-08-14-desktop-path-bridge.zh.md: 8838990236759c209fd8c76c6bae8805a2f46161

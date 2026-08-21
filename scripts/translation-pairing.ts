@@ -166,6 +166,12 @@ export const TRANSLATION_SCOPE_GLOB_EXCLUDES = [
   '**/.pytest_cache/**',
   'apps/web/dist/**',
   '.artifacts/**',
+  // Rust build output (the desktop crate copies the bundled harness tree into
+  // src-tauri/target during a local build); it duplicates shipped sources.
+  '**/target/**',
+  // Desktop installer source bundle: a generated copy of the trimmed harness
+  // tree whose out-of-context relative links have no corpus counterparts.
+  'apps/desktop-tauri/bundled/**',
   'python/sdk-runtime/src/deepseek_harness_runtime/runtime/dsh-jsonrpc-agent-*/**',
   'python/sdk-runtime/src/deepseek_harness_runtime/runtime/node/**',
   'vendor/**',

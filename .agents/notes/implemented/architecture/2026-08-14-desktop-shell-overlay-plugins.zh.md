@@ -16,7 +16,7 @@ Status: implemented
 
 **更新仍使用带签名的 Tauri updater。** 签名检查在主窗口打开之后再跑，避免网络失败或超时拖住启动页。托盘「检查更新」按需运行同一套签名检查。
 
-这是对[跨平台桌面源码预配](../feature/2026-08-14-cross-platform-desktop-source-provisioning.md)的延伸，并不把桌面行为移进 `packages/`。
+这是对[跨平台桌面源码预配](../feature/2026-08-14-cross-platform-desktop-source-provisioning.zh.md)的延伸，并不把桌面行为移进 `packages/`。
 
 ## 曾考虑的替代方案
 

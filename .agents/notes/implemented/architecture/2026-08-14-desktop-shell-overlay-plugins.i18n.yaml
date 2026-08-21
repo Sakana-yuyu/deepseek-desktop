@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-14-desktop-shell-overlay-plugins.md
 2026-08-14-desktop-shell-overlay-plugins.md: 9766c607adc611fc4a9b374fb077705156bc654e
-2026-08-14-desktop-shell-overlay-plugins.zh.md: c2dbbe28947af9761380239ab50b13d5bca63d4e
+2026-08-14-desktop-shell-overlay-plugins.zh.md: cb4e3140c926a56e0fa0d971e704f8bfc5686207

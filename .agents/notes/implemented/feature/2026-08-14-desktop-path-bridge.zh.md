@@ -29,7 +29,7 @@ Host 子进程 PATH 从发现 PATH（进程 PATH，Windows 上再加上用户/�
 
 **用户 PATH 只补仍然缺失的项。** Windows 通过注册表把 shim 目录追加到 HKCU 用户 Path，并广播 `WM_SETTINGCHANGE`；仅当发现 PATH 上仍没有可 spawn 的对应命令时，才追加 Node 或 pnpm 目录。Unix 把 `dsh` shim 复制到 `~/.local/bin`，若该目录还不在 PATH 上，则向 `~/.zprofile`（macOS）或 `~/.profile`（Linux）追加带标记的 `export PATH` 块。已有 Path 条目不会被重排或删除。持久化失败只记日志，不阻止 Host 启动。
 
-这建立在[桌面端主机工具链扫描与主目录匹配](2026-08-14-desktop-host-env-and-home-adoption.md)之上：同一次选定的 Node 和 pnpm 同时供给扫描和 shim。
+这建立在[桌面端主机工具链扫描与主目录匹配](2026-08-14-desktop-host-env-and-home-adoption.zh.md)之上：同一次选定的 Node 和 pnpm 同时供给扫描和 shim。
 
 ## 曾考虑的替代方案
 

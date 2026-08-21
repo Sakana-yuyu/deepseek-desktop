@@ -6,13 +6,13 @@ Status: implemented
 
 ## 问题
 
-桌面端“运行时 manifest 已就绪”的跳过路径要求私有的 `runtime/node` 和 `runtime/pnpm-global` 文件存在，并返回这两条私有路径。[主机工具链扫描](../feature/2026-08-14-desktop-host-env-and-home-adoption.md) 会复用本机已有的兼容 Node 和 pnpm，因此这些私有文件常常从未被创建。之后每次启动都会删除按哈希隔离的 harness 树（包括 `node_modules`），并再次执行 `pnpm install --prod`。本机已安装 Node `^22.19 || >=24` 的用户因此每次都要在启动页上等数分钟。PATH 桥的 `dsh.exe` shim 也会在每次启动时从桌面二进制解除链接并重新复制。
+桌面端“运行时 manifest 已就绪”的跳过路径要求私有的 `runtime/node` 和 `runtime/pnpm-global` 文件存在，并返回这两条私有路径。[主机工具链扫描](../feature/2026-08-14-desktop-host-env-and-home-adoption.zh.md) 会复用本机已有的兼容 Node 和 pnpm，因此这些私有文件常常从未被创建。之后每次启动都会删除按哈希隔离的 harness 树（包括 `node_modules`），并再次执行 `pnpm install --prod`。本机已安装 Node `^22.19 || >=24` 的用户因此每次都要在启动页上等数分钟。PATH 桥的 `dsh.exe` shim 也会在每次启动时从桌面二进制解除链接并重新复制。
 
 ## 决策
 
 `ready_toolchain` 从运行时 manifest 读取 `nodePath` 和 `pnpmPath`。当 bundle 哈希仍匹配、`apps/cli/lib/bin.js` 与 `node_modules/.pnpm` 存在、且这些二进制（或私有回退文件）仍在时，预配返回已记录路径，并跳过主机扫描、源码释放和 `pnpm install`。已有 CLI 入口的 harness 目录不会被清空；只有缺少 `.pnpm` 时才运行 `pnpm install`。manifest 会记录 `pnpmPath`。仅当 `dsh.exe` shim 缺失、大小不同、或比桌面二进制更旧时才刷新。
 
-本笔记只负责重复启动的跳过路径。主机匹配、主目录采用和首次镜像拉取仍由[主机工具链扫描与主目录匹配](../feature/2026-08-14-desktop-host-env-and-home-adoption.md)和[跨平台源码预配](../feature/2026-08-14-cross-platform-desktop-source-provisioning.md)负责。
+本笔记只负责重复启动的跳过路径。主机匹配、主目录采用和首次镜像拉取仍由[主机工具链扫描与主目录匹配](../feature/2026-08-14-desktop-host-env-and-home-adoption.zh.md)和[跨平台源码预配](../feature/2026-08-14-cross-platform-desktop-source-provisioning.zh.md)负责。
 
 ## 曾考虑的替代方案
 

@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-19-desktop-rc7-provision-fallback.md
 2026-08-19-desktop-rc7-provision-fallback.md: dd0bce8a8ece025bfdd4f71df89eee1af293eeba
-2026-08-19-desktop-rc7-provision-fallback.zh.md: 33197fc0d1983de85b05940f548eb646054c76a8
+2026-08-19-desktop-rc7-provision-fallback.zh.md: 6aa3dfb729c074c48c80e2e8398b3e4bfc0fed56

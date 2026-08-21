@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-14-cross-platform-desktop-source-provisioning.md
 2026-08-14-cross-platform-desktop-source-provisioning.md: 14d6791b4d90eeb0cb0cdf1548ccf379f2d083b4
-2026-08-14-cross-platform-desktop-source-provisioning.zh.md: 87ee257a64867d8edcbaa3f4fcbe7b8b34c06acd
+2026-08-14-cross-platform-desktop-source-provisioning.zh.md: 705985a42893c32e3f0d1a4caa3d052151f03550

@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-17-desktop-repeat-boot-host-toolchain.md
 2026-08-17-desktop-repeat-boot-host-toolchain.md: 614b817241e783007c56d2d9826382f1d3b6efe8
-2026-08-17-desktop-repeat-boot-host-toolchain.zh.md: f0c7d3b50c59a2a35a09ee6ee5dd818947cf5f6b
+2026-08-17-desktop-repeat-boot-host-toolchain.zh.md: ac452fe4aa137a9d898f87273292714e39aee8cf

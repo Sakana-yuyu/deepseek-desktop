@@ -69,7 +69,7 @@
 ### 1. 下载并安装
 
 1. 打开 [GitHub Releases](https://github.com/Sakana-yuyu/deepseek-harness-desktop/releases)。
-2. 下载当前 **0.1.0-rc.8-0.1** 对应平台的安装包。
+2. 下载当前 **0.1.1-rc.1-0.1** 对应平台的安装包。
 3. Windows 如果出现 SmartScreen 提示，确认来源后选择“更多信息”并继续运行。
 4. 首次启动先扫描本机 Node / pnpm 和已有 `~/.dsh` 对话与密钥，只在缺失时下载运行时和生产依赖，后续启动复用已匹配的环境。
 
@@ -79,7 +79,7 @@
 
 Harness 框架代码在 `packages/`、`apps/cli`、`apps/web`。桌面能力全部留在 `apps/desktop-tauri/`。同步上游时拉取框架目录即可，不要把桌面改动写进 `packages/`。
 
-实现与构建细节见[桌面端 README](apps/desktop-tauri/README.md)。
+实现与构建细节见[桌面端 README](apps/desktop-tauri/README.zh.md)。
 
 <a id="run"></a>
 
@@ -116,7 +116,7 @@ pnpm --dir apps/desktop-tauri run build
 
 ## 参与贡献
 
-桌面端问题与贡献请提交到本 fork。Harness 框架贡献请遵循上游的[贡献指南](CONTRIBUTING.md)、[开发指南](docs/development.md)和[架构文档](docs/architecture.md)。
+桌面端问题与贡献请提交到本 fork。Harness 框架贡献请遵循上游的[贡献指南](CONTRIBUTING.zh.md)、[开发指南](docs/development.zh.md)和[架构文档](docs/architecture.zh.md)。
 
 <p align="center">
   <a href="https://github.com/Sakana-yuyu"><img src="https://avatars.githubusercontent.com/Sakana-yuyu?s=80" width="48" height="48" alt="Sakana-yuyu" title="Sakana-yuyu" /></a>

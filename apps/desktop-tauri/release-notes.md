@@ -1,4 +1,4 @@
-# DeepSeek Harness Desktop 0.1.0-rc.8-0.1
+# DeepSeek Harness Desktop 0.1.1-rc.1-0.1
 
 ## English
 
@@ -8,8 +8,8 @@ The installer contains a trimmed Harness source tree without `node_modules`. On 
 
 ### What's new
 
-- Refreshes the bundled Harness source to upstream `dsh@0.1.0-rc.8`, with the upstream changes since rc.7 to the agent loop, web UI, and tools.
-- Keeps the 0.1.0-rc.7-0.2 provisioning fixes: derived workspace declarations, bootable-tree fallback, install deadlines, and harness-tree cleanup.
+- Refreshes the bundled Harness source to upstream `dsh@0.1.1-rc.1`, with the upstream changes since 0.1.0-rc.8 to the agent loop, web UI, and tools.
+- Keeps the earlier desktop provisioning guarantees: derived workspace declarations, bootable-tree fallback when provisioning fails, install deadlines, and harness-tree cleanup.
 - Windows installation closes a running desktop process before replacing files and refreshes an existing desktop shortcut with the versioned DeepSeek fish icon.
 
 ### Included builds
@@ -28,8 +28,8 @@ DeepSeek Harness Desktop 是现有 `dsh web` 界面的 Tauri/WebView 外壳。
 
 ### 更新内容
 
-- 内置 Harness 源码更新至上游 `dsh@0.1.0-rc.8`，包含 rc.7 以来上游对 agent 循环、Web 界面和工具的更新。
-- 保留 0.1.0-rc.7-0.2 的预配修复：workspace 声明派生、可启动树回退、安装期限与 harness 树清理。
+- 内置 Harness 源码更新至上游 `dsh@0.1.1-rc.1`，包含 0.1.0-rc.8 以来上游对 agent 循环、Web 界面和工具的更新。
+- 保留既有的桌面预配保障：workspace 声明派生、预配失败时回退到可启动树、安装期限与 harness 树清理。
 - Windows 安装会先关闭正在运行的桌面进程再替换文件，并用带版本号的 DeepSeek 鱼形图标刷新已有桌面快捷方式。
 
 ### 包含的构建

@@ -62,7 +62,7 @@ Download builds from [Releases](https://github.com/Sakana-yuyu/deepseek-harness-
 ## Quick start
 
 1. Open [GitHub Releases](https://github.com/Sakana-yuyu/deepseek-harness-desktop/releases).
-2. Install **0.1.0-rc.8-0.1** for your platform.
+2. Install **0.1.1-rc.1-0.1** for your platform.
 3. First launch scans host Node / pnpm and an existing `~/.dsh` home, then downloads only what is missing.
 
 ## Community

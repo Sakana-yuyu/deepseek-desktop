@@ -12,7 +12,7 @@ Status: implemented
 
 打包脚本改为从仓库的 `pnpm-workspace.yaml` 派生安装包内的 workspace 文件，只替换 `packages:` 成员，`patchedDependencies`、`allowBuilds` 及其余段落原样复制，声明因此始终与实际交付的源码树一致。一棵 harness 树只有在 `apps/cli/lib/bin.js` 与 `node_modules/.pnpm` 同时存在时才算可启动；bundle 哈希回退候选与 `find_existing_harness` 只接受可启动的树，并按修改时间从新到旧排序。`pnpm install`、pnpm 自安装与 Node 归档下载分别有 20、10、15 分钟的期限；到期即让该步骤失败并落入既有回退路径，而不是让启动页停摆。预配成功后只保留最新的三棵 `harness-versions` 树，更旧的树按目录容忍失败地删除。
 
-本记录拥有安装包 workspace 派生、回退有效性、步骤期限与旧树清理。预配模型与更新流程仍由[跨平台桌面源码预配](../feature/2026-08-14-cross-platform-desktop-source-provisioning.md)拥有。
+本记录拥有安装包 workspace 派生、回退有效性、步骤期限与旧树清理。预配模型与更新流程仍由[跨平台桌面源码预配](../feature/2026-08-14-cross-platform-desktop-source-provisioning.zh.md)拥有。
 
 ## Alternatives considered
 
